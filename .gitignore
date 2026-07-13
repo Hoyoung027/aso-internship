@@ -203,6 +203,10 @@ cython_debug/
 # Temporary file for partial code execution
 tempCodeRunnerFile.py
 
+# FlashInfer attention benchmark generated data
+flashinfer-attention/artifacts/
+flashinfer-attention/results/
+
 # Ruff stuff:
 .ruff_cache/
 
