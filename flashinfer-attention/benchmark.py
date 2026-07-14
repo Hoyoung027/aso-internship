@@ -41,11 +41,16 @@ require_physical_gpu_1()
 import torch  # noqa: E402
 import flashinfer  # noqa: E402
 
-from flashinfer.decode import (  # noqa: E402
-    SINGLE_KERNEL_TMP_SIZE,
-    get_single_decode_module,
-)
+from flashinfer.decode import get_single_decode_module  # noqa: E402
 from flashinfer.prefill import get_single_prefill_module  # noqa: E402
+
+
+# 두 비교 커밋의 public single-attention API가 사용하는 workspace 크기다.
+# legacy PyTorch-binding 커밋(ea569640)은 이 값을 decode.py 안에 직접
+# `32 * 1024 * 1024`로 적어 두어 SINGLE_KERNEL_TMP_SIZE를 export하지 않는다.
+# benchmark가 특정 버전의 private constant 이름에 의존하지 않도록 자체적으로
+# 같은 크기를 정의한다.
+SINGLE_KERNEL_TMP_SIZE_BYTES = 32 * 1024 * 1024
 
 
 # torch와 flashinfer import가 끝난 시각. PROCESS_START_NS와의 차이가
@@ -118,7 +123,7 @@ class SingleAttentionRunner:
         self.device = torch.device("cuda:0")
         self.dtype = torch.float16
         self.tmp = torch.empty(
-            SINGLE_KERNEL_TMP_SIZE, dtype=torch.uint8, device=self.device
+            SINGLE_KERNEL_TMP_SIZE_BYTES, dtype=torch.uint8, device=self.device
         )
 
         # get_single_*의 첫 호출은 JIT cache miss라면 NVCC compile까지 수행한다.
