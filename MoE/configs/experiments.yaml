@@ -1,0 +1,90 @@
+server:
+  # Profiler-enabled vLLM 서버는 같은 GPU 노드의 localhost에서 실행한다.
+  base_url: http://127.0.0.1:8000
+  model: gpt-oss-20b
+
+paths:
+  # Small request metadata belongs in this repository.
+  request_results: results/requests
+  experiment_csv: results/experiment.csv
+  # Point vLLM's torch_profiler_dir here, not into the Git repository.
+  torch_traces: /lustre/hybyun0207/gptoss-profile/torch-traces
+
+common:
+  # Diverse but deterministic tokens avoid a repeated-token routing bias.
+  prompt_pattern: random
+  prompt_seed: 42
+  prompt_token_min: 1000
+  prompt_token_max: 100000
+  prompt_token_id: 1000
+  # Warmup은 profiler 시작 전에 실행되므로 결과 trace에 들어가지 않는다.
+  warmup: 1
+  # 파이프라인 검증 후 최종 측정에서는 3으로 올린다.
+  repetitions: 1
+  timeout: 1800
+  profile: true
+
+experiments:
+  # Batch 1에서 sequence length만 변화시켜 Prefill scaling을 측정한다.
+  prefill:
+    - batch_size: 1
+      input_len: 128
+      output_len: 1
+    - batch_size: 1
+      input_len: 256
+      output_len: 1
+    - batch_size: 1
+      input_len: 512
+      output_len: 1
+    - batch_size: 1
+      input_len: 1024
+      output_len: 1
+    - batch_size: 1
+      input_len: 2048
+      output_len: 1
+    - batch_size: 1
+      input_len: 4096
+      output_len: 1
+    - batch_size: 1
+      input_len: 8192
+      output_len: 1
+
+  # 앞의 7개 조건은 batch 1 context-length sweep이다. 뒤의 5개 조건은
+  # input_len=1024를 고정한 batch sweep이며, b1/i1024 조건은 중복하지 않는다.
+  decode:
+    - batch_size: 1
+      input_len: 128
+      output_len: 128
+    - batch_size: 1
+      input_len: 256
+      output_len: 128
+    - batch_size: 1
+      input_len: 512
+      output_len: 128
+    - batch_size: 1
+      input_len: 1024
+      output_len: 128
+    - batch_size: 1
+      input_len: 2048
+      output_len: 128
+    - batch_size: 1
+      input_len: 4096
+      output_len: 128
+    - batch_size: 1
+      input_len: 8192
+      output_len: 128
+    - batch_size: 2
+      input_len: 1024
+      output_len: 128
+    - batch_size: 4
+      input_len: 1024
+      output_len: 128
+    - batch_size: 8
+      input_len: 1024
+      output_len: 128
+    - batch_size: 16
+      input_len: 1024
+      output_len: 128
+    - batch_size: 32
+      input_len: 1024
+      output_len: 128
