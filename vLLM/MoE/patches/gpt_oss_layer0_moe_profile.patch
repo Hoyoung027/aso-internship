@@ -1,0 +1,66 @@
+diff --git a/vllm/model_executor/models/gpt_oss.py b/vllm/model_executor/models/gpt_oss.py
+--- a/vllm/model_executor/models/gpt_oss.py
++++ b/vllm/model_executor/models/gpt_oss.py
+@@ -1,5 +1,6 @@
+ # SPDX-License-Identifier: Apache-2.0
+ # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
++import os
+ import typing
+ from collections.abc import Callable, Iterable
+ 
+@@ -170,6 +171,10 @@ class MLPBlock(torch.nn.Module):
+         parallel_config = vllm_config.parallel_config
+ 
+         self.is_sequence_parallel = parallel_config.use_sequence_parallel_moe
++        self.profile_layer0 = (
++            layer_idx == 0
++            and os.environ.get("GPTOSS_MOE_PROFILE_LAYER0", "0") == "1"
++        )
+ 
+         self.layer_idx = layer_idx
+         self.num_experts = config.num_local_experts
+@@ -206,13 +211,38 @@ class MLPBlock(torch.nn.Module):
+         if self.is_sequence_parallel:
+             x = sequence_parallel_chunk(x)
+ 
+-        if current_platform.is_rocm():
+-            g = rocm_unquantized_gemm(
+-                self, x[:, : self.hidden_size], self.router.weight, self.router.bias
+-            )
++        if self.profile_layer0:
++            with torch.profiler.record_function(
++                f"GPTOSS_ROUTER_L0_M{x.shape[0]}"
++            ):
++                if current_platform.is_rocm():
++                    g = rocm_unquantized_gemm(
++                        self,
++                        x[:, : self.hidden_size],
++                        self.router.weight,
++                        self.router.bias,
++                    )
++                else:
++                    g = self.router(x)
+         else:
+-            g = self.router(x)
+-        x = self.experts(hidden_states=x, router_logits=g)[:, : self.hidden_size]
++            if current_platform.is_rocm():
++                g = rocm_unquantized_gemm(
++                    self,
++                    x[:, : self.hidden_size],
++                    self.router.weight,
++                    self.router.bias,
++                )
++            else:
++                g = self.router(x)
++
++        if self.profile_layer0:
++            with torch.profiler.record_function(
++                f"GPTOSS_FUSED_MOE_L0_M{x.shape[0]}"
++            ):
++                x = self.experts(hidden_states=x, router_logits=g)
++        else:
++            x = self.experts(hidden_states=x, router_logits=g)
++        x = x[:, : self.hidden_size]
+ 
+         if self.is_sequence_parallel:
+             x = tensor_model_parallel_all_gather(x.contiguous(), 0)

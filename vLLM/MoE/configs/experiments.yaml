@@ -1,0 +1,113 @@
+common:
+  num_tokens:
+    - 1
+    - 2
+    - 4
+    - 8
+    - 16
+    - 24
+    - 32
+    - 48
+    - 64
+    - 96
+    - 128
+    - 256
+    - 512
+    - 1024
+    - 1536
+    - 2048
+    - 3072
+    - 4096
+    - 8192
+  warmup: 20
+  repeat: 50
+  seed: 42
+  master_num_tokens: 8192
+  prompt_token_min: 1000
+  prompt_token_max: 100000
+  request_timeout_seconds: 1800
+
+server:
+  host: 127.0.0.1
+  port: 8000
+  served_model_name: gpt-oss-20b
+  startup_timeout_seconds: 7200
+  shutdown_timeout_seconds: 30
+  max_model_len: 16384
+  max_num_seqs: 1
+  max_num_batched_tokens: 8192
+  gpu_memory_utilization: 0.90
+  attention_backend: TRITON_ATTN
+
+backends:
+  - id: marlin_w4a16
+    requested_backend: marlin
+    expected_backend: MARLIN
+    activation_dtype: bf16
+    flashinfer_autotune: false
+    environment: {}
+    server_args:
+      - --moe-backend
+      - marlin
+      - --no-enable-flashinfer-autotune
+
+  - id: humming_indexed_w4a16
+    requested_backend: humming
+    expected_backend: HUMMING
+    activation_dtype: bf16
+    flashinfer_autotune: false
+    environment:
+      VLLM_HUMMING_MOE_GEMM_TYPE: indexed
+    server_args:
+      - --moe-backend
+      - humming
+      - --no-enable-flashinfer-autotune
+
+  - id: humming_grouped_w4a16
+    requested_backend: humming
+    expected_backend: HUMMING
+    activation_dtype: bf16
+    flashinfer_autotune: false
+    environment:
+      VLLM_HUMMING_MOE_GEMM_TYPE: grouped
+    server_args:
+      - --moe-backend
+      - humming
+      - --no-enable-flashinfer-autotune
+
+  - id: flashinfer_cutlass_w4a8_tune_off
+    requested_backend: flashinfer_cutlass
+    expected_backend: FLASHINFER_CUTLASS_MXFP4_MXFP8
+    activation_dtype: mxfp8
+    flashinfer_autotune: false
+    environment: {}
+    server_args:
+      - --moe-backend
+      - flashinfer_cutlass
+      - --quantization-config.moe.activation
+      - mxfp8
+      - --no-enable-flashinfer-autotune
+
+  - id: flashinfer_cutlass_w4a8_tune_on
+    requested_backend: flashinfer_cutlass
+    expected_backend: FLASHINFER_CUTLASS_MXFP4_MXFP8
+    activation_dtype: mxfp8
+    flashinfer_autotune: true
+    environment: {}
+    server_args:
+      - --moe-backend
+      - flashinfer_cutlass
+      - --quantization-config.moe.activation
+      - mxfp8
+      - --enable-flashinfer-autotune
+
+  - id: emulation_w4a16
+    requested_backend: emulation
+    expected_backend: EMULATION
+    activation_dtype: bf16
+    flashinfer_autotune: false
+    environment: {}
+    server_args:
+      - --moe-backend
+      - emulation
+      - --no-enable-flashinfer-autotune
