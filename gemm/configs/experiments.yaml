@@ -1,0 +1,53 @@
+seed: 42
+warmup: 100
+repeat: 100
+trials: 3
+
+m_values:
+  - 1
+  - 2
+  - 4
+  - 8
+  - 16
+  - 24
+  - 32
+  - 48
+  - 64
+  - 96
+  - 128
+  - 256
+  - 512
+  - 1024
+  - 1536
+  - 2048
+  - 3072
+  - 4096
+  - 8192
+  - 16384
+  - 32768
+
+projections:
+  qkv:
+    k: 2880
+    n: 5120
+  o:
+    k: 4096
+    n: 2880
+  router_gate:
+    k: 2880
+    n: 32
+  expert_w13:
+    k: 2880
+    n: 5760
+  expert_w2:
+    k: 2880
+    n: 2880
+
+experiments:
+  torch:
+    - bf16
+    - mxfp8
+  flashinfer:
+    - bf16
+    - mxfp8
+    - mxfp4
