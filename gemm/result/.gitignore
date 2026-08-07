@@ -1,0 +1,12 @@
+# Experiment logs and raw/aggregated data are local artifacts.
+*
+
+# Keep traversing result directories so generated figures can be tracked.
+!*/
+!.gitignore
+!**/*.png
+!**/*.jpg
+!**/*.jpeg
+!**/*.svg
+!**/*.webp
+!**/*.gif

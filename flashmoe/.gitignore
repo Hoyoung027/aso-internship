@@ -1,0 +1,4 @@
+# Generated CMake/Ninja build trees
+/build-*/
+/paper_reproduction/build-*/
+

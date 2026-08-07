@@ -1,0 +1,134 @@
+diff --git a/csrc/include/flashmoe/tile.cuh b/csrc/include/flashmoe/tile.cuh
+index 65af329..32dd179 100644
+--- a/csrc/include/flashmoe/tile.cuh
++++ b/csrc/include/flashmoe/tile.cuh
+@@ -331,7 +331,7 @@ namespace flashmoe::tile
+       cublasdx::Alignment<aAlignment, bAlignment, cAlignment>() +
+       cublasdx::StaticBlockDim() +
+       cublasdx::EnableInputStreaming() +
+-      cublasdx::SM<Arch, Arch >= 900 ? cublasdx::sm_modifier::arch_specific : cublasdx::sm_modifier::generic>());
++      cublasdx::SM<Arch, Arch >= 900 && Arch != 1200 ? cublasdx::sm_modifier::arch_specific : cublasdx::sm_modifier::generic>());
+     return GhostBLAS::max_threads_per_block;
+   }
+ 
+@@ -371,7 +371,7 @@ namespace flashmoe::tile
+         cublasdx::BlockDim<threads>() +
+         cublasdx::StaticBlockDim() +
+         cublasdx::EnableInputStreaming() +
+-        cublasdx::SM<Arch, Arch >= 900 ? cublasdx::sm_modifier::arch_specific : cublasdx::sm_modifier::generic>()),
++        cublasdx::SM<Arch, Arch >= 900 && Arch != 1200 ? cublasdx::sm_modifier::arch_specific : cublasdx::sm_modifier::generic>()),
+       decltype(
+         cublasdx::Size<bM, bN, bK>() +
+         cublasdx::Precision<TranslatedElement, TranslatedElement, MMA_C>() +
+@@ -382,7 +382,7 @@ namespace flashmoe::tile
+         cublasdx::Alignment<aAlignment, bAlignment, cAlignment>() +
+         cublasdx::BlockDim<threads>() +
+         cublasdx::StaticBlockDim() +
+-        cublasdx::SM<Arch, Arch >= 900 ? cublasdx::sm_modifier::arch_specific : cublasdx::sm_modifier::generic>())>;
++        cublasdx::SM<Arch, Arch >= 900 && Arch != 1200 ? cublasdx::sm_modifier::arch_specific : cublasdx::sm_modifier::generic>())>;
+     using TileArch = cute::Int<Arch>;
+     using Threads = cute::Int<threads>;
+     using TileShape = cute::Shape<cute::Int<bM>, cute::Int<bN>, cute::Int<bK>>;
+diff --git a/csrc/tests/flashmoe.cu b/csrc/tests/flashmoe.cu
+index 78277ec..3ef015f 100644
+--- a/csrc/tests/flashmoe.cu
++++ b/csrc/tests/flashmoe.cu
+@@ -289,6 +289,7 @@ struct Options {
+   const uint graph_launches = 8;
+   const float rtol = 8e-2;
+   const float atol = 8e-3;
++  const uint64_t seed = 42;
+   // expert capacity per expert per peer. EC ∈ {1,...,ceil(S/E)*k,...,S}
+   const size_t EC = cute::ceil_div(S, E) * k;
+ };
+@@ -422,26 +423,27 @@ void kickstart(const Options& opts) {
+ 
+   constexpr float minv = -1.0f;
+   constexpr float maxv = 1.0f;
+-  std::random_device rd;
++  std::mt19937_64 localRng(opts.seed + static_cast<uint64_t>(epRank) * 0x9e3779b97f4a7c15ULL);
+   Element* tokens = nullptr;
+   const auto roundS = cute::max(opts.S, static_cast<size_t>(bM));
+   CHECK_CUDA(cudaMallocAsync(&tokens, sizeof(Element) * roundS * opts.H, stream));
+-  randUniform<Arch>(tokens, roundS * opts.H, rd(), minv, maxv, stream);
++  randUniform<Arch>(tokens, roundS * opts.H, localRng(), minv, maxv, stream);
+ 
+   Element* gateWeights = nullptr;
+   CHECK_CUDA(cudaMallocAsync(&gateWeights, sizeof(Element) * opts.H * opts.E, stream));
+-  randUniform<Arch>(gateWeights, static_cast<size_t>(opts.H) * opts.E, rd(), minv, maxv, stream);
++  randUniform<Arch>(gateWeights, static_cast<size_t>(opts.H) * opts.E, localRng(), minv, maxv, stream);
+ 
+   Seeds seeds{};
+   if (epRank == 0) {
+-    seeds.expertUp = rd();
+-    seeds.expertUpV = rd();
+-    seeds.expertDown = rd();
+-    seeds.biasUp = rd();
+-    seeds.biasUpV = rd();
+-    seeds.biasDown = rd();
+-    seeds.alpha = rd();
+-    seeds.beta = rd();
++    std::mt19937_64 sharedRng(opts.seed);
++    seeds.expertUp = sharedRng();
++    seeds.expertUpV = sharedRng();
++    seeds.expertDown = sharedRng();
++    seeds.biasUp = sharedRng();
++    seeds.biasUpV = sharedRng();
++    seeds.biasDown = sharedRng();
++    seeds.alpha = sharedRng();
++    seeds.beta = sharedRng();
+   }
+   if (world > 1) {
+     // Rank 0 will generate all seeds and propagate to every rank
+@@ -713,7 +715,7 @@ float parse_f32(const char* s, const char* name) {
+   }
+ }
+ 
+-//./testFlashMoE_generated <S> <H> <I> <E> <k> <graph_launches> <warmup> <runs> <rtol> <atol> <EC>
++//./testFlashMoE_generated <S> <H> <I> <E> <k> <graph_launches> <warmup> <runs> <rtol> <atol> <EC> <seed>
+ __host__
+ void drive(const int argc, char** argv) {
+   size_t S = 8192;
+@@ -728,6 +730,7 @@ void drive(const int argc, char** argv) {
+   uint graph_launches = 8;
+   float rtol = 8e-2;
+   float atol = 8e-3;
++  uint64_t seed = 42;
+   if (argc > 1) S = parse_integer(argv[1], "S", 1, INT32_MAX);
+   if (argc > 2) H = parse_integer(argv[2], "H", 1, INT32_MAX);
+   if (argc > 3) I = parse_integer(argv[3], "I", 1, INT32_MAX);
+@@ -744,6 +747,9 @@ void drive(const int argc, char** argv) {
+   else {
+     EC = cute::ceil_div(S, E) * k;
+   }
++  if (argc > 12) {
++    seed = parse_integer(argv[12], "seed", 0);
++  }
+ 
+   const auto opts = Options{
+     .S = S,
+@@ -756,10 +762,11 @@ void drive(const int argc, char** argv) {
+     .graph_launches = graph_launches,
+     .rtol = rtol,
+     .atol = atol,
++    .seed = seed,
+     .EC = EC,
+   };
+ 
+-  using Element = __nv_bfloat16;
++  using Element = float;
+   static_assert(cuda::std::is_same_v<Element, __half> ||
+     cuda::std::is_same_v<Element, __nv_bfloat16> ||
+     cuda::std::is_same_v<Element, float> ||
+@@ -787,7 +794,10 @@ void drive(const int argc, char** argv) {
+   if (I <= bK1 || I % bK1 != 0 || I < bN0 || I % bN0 != 0) {
+     throw std::invalid_argument("I is invalid");
+   }
+-  constexpr auto pS = arch >= 900 ? 3 : arch >= 800 ? 2 : 1; // Hopper 3
++  // FP32 gated MLP needs 128 KiB at pS=2. RTX PRO 6000 exposes
++  // 99 KiB of opt-in shared memory per block, so the SM120 port uses
++  // one pipeline stage (80 KiB for the selected tile).
++  constexpr auto pS = arch == 1200 ? 1 : arch >= 900 ? 3 : arch >= 800 ? 2 : 1;
+   constexpr auto bM = cuda::std::is_same_v<Element, double> ? 64 : 128; // hopper, S >= 4096 -> bM = 256
+   static_assert(bM >= 1);
+   if (S < 1 || (S > bM && S % bM != 0)) {
