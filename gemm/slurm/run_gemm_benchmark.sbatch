@@ -62,6 +62,7 @@ import flashinfer
 
 print("PyTorch:", torch.__version__)
 print("Torch CUDA:", torch.version.cuda)
+print("TorchAO:", version("torchao"))
 print("FlashInfer:", version("flashinfer-python"))
 print("FlashInfer cubin:", version("flashinfer-cubin"))
 print("cuDNN:", torch.backends.cudnn.version())
@@ -70,6 +71,7 @@ print("Capability:", torch.cuda.get_device_capability())
 
 assert torch.__version__.startswith("2.11.0")
 assert torch.version.cuda == "13.0"
+assert version("torchao") == "0.17.0"
 assert version("flashinfer-python") == "0.6.12"
 assert torch.cuda.get_device_capability() == (12, 0)
 assert (torch.backends.cudnn.version() or 0) >= 91400
@@ -121,6 +123,18 @@ echo "Running FlashInfer MXFP8 compatibility smoke test"
   --repeat 3 \
   --fail-fast
 
+echo "Running PyTorch MXFP4 compatibility smoke test"
+"$GEMM_ENV/bin/python" "$PROJECT_DIR/benchmark_gemm.py" \
+  --config "$CONFIG" \
+  --output-dir "$RESULT_DIR/smoke" \
+  --cache-dir "$AUTOTUNE_CACHE_DIR" \
+  --mode torch \
+  --precision mxfp4 \
+  --m-values 128 \
+  --warmup 2 \
+  --repeat 3 \
+  --fail-fast
+
 for precision in bf16 mxfp8 mxfp4; do
   tune_args=()
   if (( FORCE_RETUNE == 1 )); then
@@ -135,7 +149,7 @@ for precision in bf16 mxfp8 mxfp4; do
 done
 
 for ((trial = 1; trial <= TRIALS; trial++)); do
-  for precision in bf16 mxfp8; do
+  for precision in bf16 mxfp8 mxfp4; do
     echo "Benchmark PyTorch precision=$precision trial=$trial/$TRIALS"
     "$GEMM_ENV/bin/python" "$PROJECT_DIR/benchmark_gemm.py" \
       "${COMMON[@]}" \

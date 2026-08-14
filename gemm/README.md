@@ -43,6 +43,8 @@ Event로 GEMM 호출 하나만 측정한다.
 |---|---|---|---|---|
 | `torch_bf16` | `torch.nn.functional.linear` | BF16 | BF16 | N/A |
 | `torch_mxfp8` | `aten._scaled_mm.out` | MXFP8 E4M3 + E8M0 block-32 | BF16 | N/A |
+| `torch_mxfp4` | `torch.nn.functional.scaled_mm` | MXFP4 E2M1 + E8M0 block-32 | BF16 | N/A |
+| `torchao_mxfp4_auto` | TorchAO quantized `nn.Linear` | dynamic MXFP4 + MXFP4 weight | BF16 | AUTO kernel |
 | `flashinfer_bf16_default` | `flashinfer.mm_bf16` | BF16 | BF16 | fallback tactic |
 | `flashinfer_bf16_tuned` | `flashinfer.mm_bf16` | BF16 | BF16 | cache 사용 |
 | `flashinfer_mxfp8_default` | `flashinfer.mm_mxfp8` | MXFP8 block-32 | BF16 | fallback tactic |
@@ -53,9 +55,15 @@ Event로 GEMM 호출 하나만 측정한다.
 일반 FP8 per-tensor scale 실험은 제거했다. PyTorch MXFP8과 FlashInfer MXFP8은
 동일한 BF16 원본을 FlashInfer `mxfp8_quantize`로 변환해 얻은 E4M3 값과 E8M0
 block-32 scale을 사용한다. 128x4 swizzled scale storage는 FlashInfer에는
-`uint8`, PyTorch에는 동일 bit를 `float8_e8m0fnu` view로 전달한다. quantization은
-양쪽 모두 timed region 밖이다. 출력도 미리 할당하고 GEMM 호출만 측정한다.
-MXFP4에는 PyTorch 기준선을 두지 않고 FlashInfer default와 tuned의 차이를 본다.
+`uint8`, PyTorch에는 동일 bit를 `float8_e8m0fnu` view로 전달한다. MXFP4도
+FlashInfer `mxfp4_quantize`가 만든 packed E2M1 값과 E8M0 block-32 scale을
+공유하며, PyTorch에는 각각 `float4_e2m1fn_x2`와 `float8_e8m0fnu` view로
+전달한다. quantization은 양쪽 모두 timed region 밖이다. BF16, MXFP8과
+FlashInfer 경로는 출력을 미리 할당하지만, PyTorch MXFP4의 새
+`F.scaled_mm` API는 `out=` overload가 없어 출력 할당이 timed call에 포함된다.
+TorchAO는 weight quantization을 timed region 밖에서 수행하고, 공식 dynamic
+activation workflow에 따라 activation quantization과 quantized Linear 호출을
+함께 측정한다. 따라서 TorchAO latency는 GEMM-only 결과가 아니다.
 
 실제 GPT-OSS-20B checkpoint의 Attention과 Router projection은 양자화 제외
 대상이므로 이 세 case는 BF16 결과가 실제 모델에 가장 가깝다. Expert W13/W2
@@ -78,6 +86,9 @@ FlashInfer 0.6.12의 실제 API 제약을 코드에 반영했다.
   경로를 사용한다.
 - SM120 MXFP4는 cuDNN 9.14 이상이 필요하며 현재 환경의 cuDNN 9.19를
   전제로 한다.
+- PyTorch 2.11 native `F.scaled_mm` MXFP4와 이를 사용하는 TorchAO 0.17의
+  `AUTO` kernel은 CUDA에서 B200/B300만 허용한다. RTX PRO 6000(SM120)에서는
+  `torch_mxfp4`와 `torchao_mxfp4_auto`를 `unsupported`로 기록한다.
 
 지원되지 않는 case나 runtime error는 CSV에서 `status`, `error`로 남는다.
 다른 API로 몰래 대체하지 않는다.
@@ -111,6 +122,7 @@ QKV/O/Router에서 `M`은 입력 token 수로 직접 해석할 수 있다. Exper
 ```text
 gemm/
 ├── README.md
+├── MXFP4_EXPERIMENT_NOTES.md
 ├── setup_env.sh
 ├── setup_runtime_env.sh
 ├── benchmark_gemm.py
@@ -429,8 +441,8 @@ mean_ms, median_ms, std_ms, min_ms, p95_ms, mean_tflops
   주의한다.
 - quantization 시간은 제외했으므로 저정밀 end-to-end latency가 아니다.
 - FlashInfer MXFP8 Router Gate는 미지원이며 누락 데이터가 아니다.
-- `torch._scaled_mm`은 private API이므로 결과에 PyTorch 정확한 버전을 함께
-  기록한다.
+- MXFP8의 `torch._scaled_mm`은 private API이며 MXFP4의 `F.scaled_mm`도 새 API라
+  동작 계약이 바뀔 수 있으므로 결과에 PyTorch 정확한 버전을 함께 기록한다.
 - 첫 실행의 JIT 및 AutoTuner 시간은 steady-state GEMM latency와 분리한다.
 
 ## 결과 그래프 생성
@@ -463,10 +475,10 @@ speedup_vs_matching_torch_precision.png
 latency 실선은 repeat 100회의 trial별 평균을 다시 3개 trial에 걸쳐 평균한 값이고,
 음영은 세 trial 평균의 표준편차다.
 `speedup_vs_matching_torch_precision.png`에서 BF16 FlashInfer의 기준은 PyTorch
-BF16 `F.linear`, MXFP8 FlashInfer의 기준은 동일 quantized tensor와 block scale을
-사용하는 PyTorch MXFP8 `aten._scaled_mm.out`이다. 각 값은
+BF16 `F.linear`, MXFP8 FlashInfer의 기준은 동일 quantized tensor와 block
+scale을 사용하는 PyTorch `aten._scaled_mm.out`이다. MXFP4 기준은 scaling
+recipe와 swizzle을 명시하는 PyTorch `F.scaled_mm`이다. 각 값은
 `PyTorch latency / FlashInfer latency`이므로 1보다 크면 FlashInfer가 빠르다.
-PyTorch MXFP4 기준을 측정하지 않으므로 MXFP4는 이 그래프에서 제외한다.
 quantization 시간은 양쪽 모두 제외된다.
 
 `flashinfer_autotune_speedup.png`는 BF16 행의 y축을 `0~2`, MXFP8과 MXFP4

@@ -37,6 +37,7 @@ fi
   --python "$GEMM_ENV/bin/python" \
   --torch-backend=cu130 \
   "torch==2.11.0" \
+  "torchao==0.17.0" \
   "flashinfer-python[cu13]==0.6.12" \
   "flashinfer-cubin==0.6.12" \
   "numpy==2.3.5" \
@@ -50,11 +51,13 @@ import torch
 
 print("PyTorch:", torch.__version__)
 print("Torch CUDA:", torch.version.cuda)
+print("TorchAO:", version("torchao"))
 print("FlashInfer:", version("flashinfer-python"))
 print("FlashInfer cubin:", version("flashinfer-cubin"))
 
 assert torch.__version__.startswith("2.11.0")
 assert torch.version.cuda == "13.0"
+assert version("torchao") == "0.17.0"
 assert version("flashinfer-python") == "0.6.12"
 assert version("flashinfer-cubin") == "0.6.12"
 PY

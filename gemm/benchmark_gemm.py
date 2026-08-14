@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """GPT-OSS-20B representative-shape GEMM microbenchmark.
 
-The timed region contains only one GEMM call. Tensor generation, quantization,
-FlashInfer autotuning, correctness checks, and CSV writes are outside it.
+Tensor generation, weight quantization, FlashInfer autotuning, correctness
+checks, and CSV writes are outside the timed region. TorchAO dynamic activation
+quantization is intentionally part of its timed quantized-Linear call.
 """
 
 from __future__ import annotations
@@ -85,7 +86,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--mode",
         required=True,
-        choices=("smoke", "torch", "default", "tune", "tuned", "aggregate"),
+        choices=(
+            "smoke",
+            "torch",
+            "torchao",
+            "default",
+            "tune",
+            "tuned",
+            "aggregate",
+        ),
     )
     parser.add_argument(
         "--precision",
@@ -278,6 +287,45 @@ def prepare_torch_case(
             selected_backend="pytorch",
             selected_tactic="mxfp8_block32_e8m0_128x4",
         )
+    if precision == "mxfp4":
+        import flashinfer
+
+        activation_q_u8, activation_scale_u8 = flashinfer.mxfp4_quantize(
+            activation
+        )
+        if prepared_weight is None:
+            weight_q_u8, weight_scale_u8 = flashinfer.mxfp4_quantize(weight)
+        else:
+            weight_q_u8, weight_scale_u8 = prepared_weight
+
+        # FlashInfer and PyTorch use the same packed E2M1 values and
+        # 128x4-swizzled E8M0 block-32 scales. Reinterpret the storage with
+        # PyTorch's shell dtypes without changing any quantized bits.
+        activation_q = activation_q_u8.view(torch.float4_e2m1fn_x2)
+        weight_q_t = weight_q_u8.view(torch.float4_e2m1fn_x2).t()
+        activation_scale = activation_scale_u8.view(torch.float8_e8m0fnu)
+        weight_scale_t = weight_scale_u8.view(torch.float8_e8m0fnu).t()
+
+        def call() -> torch.Tensor:
+            return F.scaled_mm(
+                activation_q,
+                weight_q_t,
+                activation_scale,
+                F.ScalingType.BlockWise1x32,
+                weight_scale_t,
+                F.ScalingType.BlockWise1x32,
+                F.SwizzleType.SWIZZLE_32_4_4,
+                F.SwizzleType.SWIZZLE_32_4_4,
+                output_dtype=torch.bfloat16,
+            )
+
+        return PreparedCase(
+            call=call,
+            reference=reference,
+            api="torch.nn.functional.scaled_mm",
+            selected_backend="pytorch",
+            selected_tactic="mxfp4_block32_e8m0_swizzle_32_4_4",
+        )
     raise ValueError(f"Unsupported PyTorch precision: {precision}")
 
 
@@ -379,6 +427,28 @@ def prepare_flashinfer_case(
     )
 
 
+def prepare_torchao_case(
+    activation: torch.Tensor,
+    weight: torch.Tensor,
+    quantized_linear: torch.nn.Module,
+) -> PreparedCase:
+    """Prepare TorchAO MXFP4 dynamic-activation inference.
+
+    Weight conversion happens once per projection before this function is
+    called. Activation quantization remains inside the timed Linear call, as
+    required by TorchAO's dynamic-activation workflow.
+    """
+    reference = F.linear(activation, weight)
+
+    return PreparedCase(
+        call=lambda: quantized_linear(activation),
+        reference=reference,
+        api="torchao.quantized_nn_linear",
+        selected_backend="torchao",
+        selected_tactic="mxfp4_auto",
+    )
+
+
 def write_rows(path: Path, rows: Iterable[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as handle:
@@ -434,14 +504,23 @@ def run_measurements(
     base_seed = int(config["seed"])
     rows: list[dict[str, Any]] = []
     is_torch = mode == "torch"
-    experiment_id = (
-        f"torch_{precision}"
-        if is_torch
-        else f"flashinfer_{precision}_{'tuned' if mode == 'tuned' else 'default'}"
-    )
+    is_torchao = mode == "torchao"
+    is_flashinfer = not is_torch and not is_torchao
+    if is_torch:
+        experiment_id = f"torch_{precision}"
+    elif is_torchao:
+        experiment_id = f"torchao_{precision}_auto"
+    else:
+        experiment_id = (
+            f"flashinfer_{precision}_{'tuned' if mode == 'tuned' else 'default'}"
+        )
 
-    if not is_torch:
+    # Torch MXFP4 uses FlashInfer only to create the packed E2M1 values and
+    # E8M0 block scales before dispatching the GEMM through F.scaled_mm.
+    if is_flashinfer or (is_torch and precision == "mxfp4"):
         import flashinfer
+
+    if is_flashinfer:
         from flashinfer.autotuner import AutoTuner, autotune
         if precision == "bf16":
             workspace_bytes = stabilize_flashinfer_bf16_workspace()
@@ -450,7 +529,6 @@ def run_measurements(
                 flush=True,
             )
     else:
-        flashinfer = None
         AutoTuner = None
         autotune = None
 
@@ -465,7 +543,7 @@ def run_measurements(
             else {}
         )
 
-        if not is_torch and precision == "mxfp8" and projection.n < 128:
+        if is_flashinfer and precision == "mxfp8" and projection.n < 128:
             for m_value in m_values:
                 rows.append(
                     status_row(
@@ -503,10 +581,38 @@ def run_measurements(
             continue
 
         prepared_weight: tuple[torch.Tensor, torch.Tensor] | None = None
+        torchao_linear: torch.nn.Module | None = None
         try:
-            if precision == "mxfp8":
+            if is_torchao:
+                from torchao.prototype.mx_formats.inference_workflow import (
+                    MXDynamicActivationMXWeightConfig,
+                )
+                from torchao.quantization import quantize_
+                from torchao.quantization.quantize_.common import KernelPreference
+
+                torchao_linear = torch.nn.Linear(
+                    projection.k,
+                    projection.n,
+                    bias=False,
+                    device="cuda",
+                    dtype=torch.bfloat16,
+                )
+                torchao_linear.weight = torch.nn.Parameter(
+                    weight.detach().clone(), requires_grad=False
+                )
+                quantize_(
+                    torchao_linear,
+                    MXDynamicActivationMXWeightConfig(
+                        block_size=32,
+                        activation_dtype=torch.float4_e2m1fn_x2,
+                        weight_dtype=torch.float4_e2m1fn_x2,
+                        kernel_preference=KernelPreference.AUTO,
+                    ),
+                )
+                torchao_linear.eval()
+            elif precision == "mxfp8":
                 prepared_weight = quantize_mxfp8(weight)
-            elif not is_torch and precision == "mxfp4":
+            elif precision == "mxfp4":
                 prepared_weight = flashinfer.mxfp4_quantize(weight)
         except (RuntimeError, ValueError, AssertionError, NotImplementedError) as exc:
             for m_value in m_values:
@@ -526,7 +632,7 @@ def run_measurements(
                 raise
             continue
 
-        if is_torch:
+        if is_torch or is_torchao:
             context = nullcontext()
         elif mode == "tuned":
             context = autotune(
@@ -548,6 +654,11 @@ def run_measurements(
                     if is_torch:
                         prepared = prepare_torch_case(
                             precision, activation, weight, prepared_weight
+                        )
+                    elif is_torchao:
+                        assert torchao_linear is not None
+                        prepared = prepare_torchao_case(
+                            activation, weight, torchao_linear
                         )
                     else:
                         prepared = prepare_flashinfer_case(
@@ -925,8 +1036,14 @@ def main() -> None:
         )
         return
 
-    if args.mode == "torch" and args.precision not in {"bf16", "mxfp8"}:
-        raise ValueError("PyTorch mode supports bf16 or mxfp8")
+    if args.mode == "torch" and args.precision not in {
+        "bf16",
+        "mxfp8",
+        "mxfp4",
+    }:
+        raise ValueError("PyTorch mode supports bf16, mxfp8, or mxfp4")
+    if args.mode == "torchao" and args.precision != "mxfp4":
+        raise ValueError("TorchAO mode currently supports only mxfp4")
     if args.mode in {"default", "tuned"} and args.precision not in {
         "bf16",
         "mxfp8",

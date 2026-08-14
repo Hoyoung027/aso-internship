@@ -47,6 +47,9 @@ experiments:
   torch:
     - bf16
     - mxfp8
+    - mxfp4
+  torchao:
+    - mxfp4_auto
   flashinfer:
     - bf16
     - mxfp8

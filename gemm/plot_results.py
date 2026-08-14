@@ -28,6 +28,8 @@ OPERATION_TITLES = {
 EXPERIMENT_LABELS = {
     "torch_bf16": "PyTorch BF16 F.linear",
     "torch_mxfp8": "PyTorch MXFP8 _scaled_mm",
+    "torch_mxfp4": "PyTorch MXFP4 F.scaled_mm",
+    "torchao_mxfp4_auto": "TorchAO MXFP4 auto",
     "flashinfer_bf16_default": "FlashInfer BF16 default",
     "flashinfer_bf16_tuned": "FlashInfer BF16 tuned",
     "flashinfer_mxfp8_default": "FlashInfer MXFP8 default",
@@ -38,6 +40,8 @@ EXPERIMENT_LABELS = {
 COLORS = {
     "torch_bf16": "#202124",
     "torch_mxfp8": "#6a1b9a",
+    "torch_mxfp4": "#00695c",
+    "torchao_mxfp4_auto": "#00838f",
     "flashinfer_bf16_default": "#90caf9",
     "flashinfer_bf16_tuned": "#1565c0",
     "flashinfer_mxfp8_default": "#ffcc80",
@@ -48,6 +52,8 @@ COLORS = {
 MARKERS = {
     "torch_bf16": "o",
     "torch_mxfp8": "o",
+    "torch_mxfp4": "o",
+    "torchao_mxfp4_auto": "D",
     "flashinfer_bf16_default": "s",
     "flashinfer_bf16_tuned": "^",
     "flashinfer_mxfp8_default": "s",
@@ -75,6 +81,8 @@ PRECISION_GROUPS = {
     "mxfp4": {
         "title": "MXFP4 latency by GPT-OSS-20B GEMM case",
         "experiments": [
+            "torch_mxfp4",
+            "torchao_mxfp4_auto",
             "flashinfer_mxfp4_default",
             "flashinfer_mxfp4_tuned",
         ],
@@ -331,6 +339,13 @@ def plot_speedup_vs_matching_torch_precision(
                 "flashinfer_mxfp8_tuned",
             ],
         },
+        "MXFP4": {
+            "baseline": "torch_mxfp4",
+            "experiments": [
+                "flashinfer_mxfp4_default",
+                "flashinfer_mxfp4_tuned",
+            ],
+        },
     }
     figure, axes = plt.subplots(
         len(rows), len(OPERATIONS), figsize=(24, 10), squeeze=False
@@ -403,8 +418,8 @@ def plot_speedup_vs_matching_torch_precision(
     figure.text(
         0.5,
         0.008,
-        "Both MXFP8 paths use identical E4M3 values and E8M0 block-32 scales; quantization time is excluded. "
-        "MXFP4 is omitted because no PyTorch MXFP4 baseline was measured.",
+        "MXFP8 and MXFP4 comparisons use identical quantized values and E8M0 block-32 scales; "
+        "quantization time is excluded.",
         ha="center",
         fontsize=9,
     )
