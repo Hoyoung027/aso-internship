@@ -12,3 +12,5 @@ ASO Lab summer internship
   NVSHMEM 통신 및 reference 대비 정확성을 검증하는 실험
 - [`gemm/`](gemm/README.md): GPT-OSS-20B의 QKV/O/Router Gate projection
   shape에서 PyTorch와 FlashInfer BF16·FP8·FP4 GEMM 및 AutoTuner를 비교하는 실험
+- [`zipserv/`](zipserv/README.md): ZipServ 공개 artifact의 합성 weight를 사용해
+  논문 모델 shape에서 ZipGEMM과 cuBLAS Tensor Core 성능을 비교하는 재현 실험

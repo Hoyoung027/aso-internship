@@ -1,0 +1,171 @@
+{
+  "schema_version": 1,
+  "description": "ZipServ synthetic-weight ZipGEMM vs cuBLAS_TC reproduction matrix",
+  "paths": {
+    "zipserv_source": "/home/hybyun0207/ZipServ_ASPLOS26",
+    "cuda_path": "/opt/ohpc/pub/apps/cuda/12.8"
+  },
+  "gpu": {
+    "expected_name_substring": "RTX 4090",
+    "sm": "89",
+    "known_bad_nodes": [
+      "cs-gpu-01"
+    ]
+  },
+  "input": {
+    "weight_source": "zipserv_synthetic_exponent_distribution",
+    "seed": 12345,
+    "dtype": "bf16"
+  },
+  "matrix": {
+    "batches": [8, 16, 32],
+    "split_k_candidates": [1, 2, 4, 8]
+  },
+  "phases": {
+    "tune": {
+      "warmup": 20,
+      "repeat": 100,
+      "trials": 3
+    },
+    "final": {
+      "warmup": 100,
+      "repeat": 1000,
+      "trials": 1
+    }
+  },
+  "timeout_seconds": 1800,
+  "models": [
+    {
+      "id": "llama3.1-8b",
+      "source_config": "meta-llama/Llama-3.1-8B-Instruct",
+      "enabled": true,
+      "layers": [
+        {"id": "qkv_proj", "M": 6144, "K": 4096},
+        {"id": "o_proj", "M": 4096, "K": 4096},
+        {"id": "gateup_proj", "M": 28672, "K": 4096},
+        {"id": "down_proj", "M": 4096, "K": 14336},
+        {"id": "lm_head", "M": 128256, "K": 4096}
+      ]
+    },
+    {
+      "id": "llama3.1-70b",
+      "source_config": "meta-llama/Llama-3.1-70B-Instruct",
+      "enabled": true,
+      "layers": [
+        {"id": "qkv_proj", "M": 10240, "K": 8192},
+        {"id": "o_proj", "M": 8192, "K": 8192},
+        {"id": "gateup_proj", "M": 57344, "K": 8192},
+        {"id": "down_proj", "M": 8192, "K": 28672},
+        {"id": "lm_head", "M": 128256, "K": 8192}
+      ]
+    },
+    {
+      "id": "llama3.1-405b",
+      "source_config": "meta-llama/Llama-3.1-405B-Instruct",
+      "enabled": true,
+      "layers": [
+        {"id": "qkv_proj", "M": 20480, "K": 16384},
+        {"id": "o_proj", "M": 16384, "K": 16384},
+        {"id": "gateup_proj", "M": 106496, "K": 16384},
+        {"id": "down_proj", "M": 16384, "K": 53248},
+        {"id": "lm_head", "M": 128256, "K": 16384}
+      ]
+    },
+    {
+      "id": "qwen2.5-7b",
+      "source_config": "Qwen/Qwen2.5-7B-Instruct",
+      "enabled": true,
+      "layers": [
+        {"id": "qkv_proj", "M": 4608, "K": 3584},
+        {"id": "o_proj", "M": 3584, "K": 3584},
+        {"id": "gateup_proj", "M": 37888, "K": 3584},
+        {"id": "down_proj", "M": 3584, "K": 18944},
+        {"id": "lm_head", "M": 152064, "K": 3584}
+      ]
+    },
+    {
+      "id": "qwen2.5-14b",
+      "source_config": "Qwen/Qwen2.5-14B-Instruct",
+      "enabled": true,
+      "layers": [
+        {"id": "qkv_proj", "M": 7168, "K": 5120},
+        {"id": "o_proj", "M": 5120, "K": 5120},
+        {"id": "gateup_proj", "M": 27648, "K": 5120},
+        {"id": "down_proj", "M": 5120, "K": 13824},
+        {"id": "lm_head", "M": 152064, "K": 5120}
+      ]
+    },
+    {
+      "id": "qwen2.5-32b",
+      "source_config": "Qwen/Qwen2.5-32B-Instruct",
+      "enabled": true,
+      "layers": [
+        {"id": "qkv_proj", "M": 7168, "K": 5120},
+        {"id": "o_proj", "M": 5120, "K": 5120},
+        {"id": "gateup_proj", "M": 55296, "K": 5120},
+        {"id": "down_proj", "M": 5120, "K": 27648},
+        {"id": "lm_head", "M": 152064, "K": 5120}
+      ]
+    },
+    {
+      "id": "qwen2.5-72b",
+      "source_config": "Qwen/Qwen2.5-72B-Instruct",
+      "enabled": true,
+      "layers": [
+        {"id": "qkv_proj", "M": 10240, "K": 8192},
+        {"id": "o_proj", "M": 8192, "K": 8192},
+        {"id": "gateup_proj", "M": 59136, "K": 8192},
+        {"id": "down_proj", "M": 8192, "K": 29568},
+        {"id": "lm_head", "M": 152064, "K": 8192}
+      ]
+    },
+    {
+      "id": "gemma3-12b",
+      "source_config": "google/gemma-3-12b-it",
+      "enabled": true,
+      "layers": [
+        {"id": "qkv_proj", "M": 8192, "K": 3840},
+        {"id": "o_proj", "M": 3840, "K": 4096},
+        {"id": "gateup_proj", "M": 30720, "K": 3840},
+        {"id": "down_proj", "M": 3840, "K": 15360},
+        {"id": "lm_head", "M": 262208, "K": 3840}
+      ]
+    },
+    {
+      "id": "gemma3-27b",
+      "source_config": "google/gemma-3-27b-it",
+      "enabled": true,
+      "layers": [
+        {"id": "qkv_proj", "M": 8192, "K": 5376},
+        {"id": "o_proj", "M": 5376, "K": 4096},
+        {"id": "gateup_proj", "M": 43008, "K": 5376},
+        {"id": "down_proj", "M": 5376, "K": 21504},
+        {"id": "lm_head", "M": 262208, "K": 5376}
+      ]
+    },
+    {
+      "id": "mistral-24b",
+      "source_config": "mistralai/Mistral-Small-24B-Instruct-2501",
+      "enabled": true,
+      "layers": [
+        {"id": "qkv_proj", "M": 7168, "K": 5120},
+        {"id": "o_proj", "M": 5120, "K": 5120},
+        {"id": "gateup_proj", "M": 65536, "K": 5120},
+        {"id": "down_proj", "M": 5120, "K": 32768},
+        {"id": "lm_head", "M": 131072, "K": 5120}
+      ]
+    },
+    {
+      "id": "mistral-123b",
+      "source_config": "mistralai/Mistral-Large-Instruct-2407",
+      "enabled": true,
+      "layers": [
+        {"id": "qkv_proj", "M": 14336, "K": 12288},
+        {"id": "o_proj", "M": 12288, "K": 12288},
+        {"id": "gateup_proj", "M": 57344, "K": 12288},
+        {"id": "down_proj", "M": 12288, "K": 28672},
+        {"id": "lm_head", "M": 32768, "K": 12288}
+      ]
+    }
+  ]
+}
