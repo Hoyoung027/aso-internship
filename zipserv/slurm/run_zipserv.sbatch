@@ -13,7 +13,7 @@
 set -euo pipefail
 
 EXP_ROOT=/home/hybyun0207/aso-internship/zipserv
-MODE=${1:-all}
+MODE=${1:-run}
 if [[ $# -gt 0 ]]; then
   shift
 fi

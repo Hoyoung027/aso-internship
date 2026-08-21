@@ -23,9 +23,9 @@
   },
   "phases": {
     "tune": {
-      "warmup": 20,
-      "repeat": 100,
-      "trials": 3
+      "warmup": 100,
+      "repeat": 1000,
+      "trials": 1
     },
     "final": {
       "warmup": 100,
@@ -62,7 +62,7 @@
     {
       "id": "llama3.1-405b",
       "source_config": "meta-llama/Llama-3.1-405B-Instruct",
-      "enabled": true,
+      "enabled": false,
       "layers": [
         {"id": "qkv_proj", "M": 20480, "K": 16384},
         {"id": "o_proj", "M": 16384, "K": 16384},

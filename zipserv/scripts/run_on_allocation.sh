@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 source "$SCRIPT_DIR/setup_runtime.sh"
 
-MODE=${1:-all}
+MODE=${1:-run}
 if [[ $# -gt 0 ]]; then
   shift
 fi

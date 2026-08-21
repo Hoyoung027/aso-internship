@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run and collect the ZipServ synthetic-weight kernel experiment matrix."""
+"""Run one model's ZipServ tuning or performance experiment."""
 
 from __future__ import annotations
 
@@ -7,21 +7,19 @@ import argparse
 import csv
 import hashlib
 import json
-import math
 import os
 import platform
 import re
 import shutil
 import socket
-import statistics
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = PROJECT_ROOT / "configs" / "experiments.json"
@@ -38,6 +36,25 @@ class Case:
     trial: int
 
 
+RESULT_FIELDS = [
+    "phase", "status", "error", "started_at", "finished_at", "wall_seconds",
+    "returncode", "model", "layer", "M", "K", "N", "split_k", "trial",
+    "warmup", "repeat", "weight_source", "seed", "cublas_latency_ms",
+    "cublas_tflops", "cublas_tc_latency_ms", "cublas_tc_tflops",
+    "zipgemm_latency_ms", "zipgemm_tflops", "compression_ratio",
+    "tc_speedup_vs_non_tc", "zipgemm_speedup_vs_non_tc", "zipgemm_speedup_vs_tc",
+    "tc_vs_non_tc_total_absolute_error", "tc_vs_non_tc_max_relative_error",
+    "tc_vs_non_tc_average_relative_error", "tc_vs_non_tc_significant_error_count",
+    "tc_vs_non_tc_significant_error_percent",
+    "zip_vs_non_tc_total_absolute_error", "zip_vs_non_tc_max_relative_error",
+    "zip_vs_non_tc_average_relative_error", "zip_vs_non_tc_significant_error_count",
+    "zip_vs_non_tc_significant_error_percent",
+    "zip_vs_tc_total_absolute_error", "zip_vs_tc_max_relative_error",
+    "zip_vs_tc_average_relative_error", "zip_vs_tc_significant_error_count",
+    "zip_vs_tc_significant_error_percent", "log_file",
+]
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
 
@@ -47,29 +64,26 @@ def load_config(path: Path) -> dict[str, Any]:
         config = json.load(handle)
     if config.get("schema_version") != 1:
         raise ValueError(f"Unsupported config schema in {path}")
-
     batches = config["matrix"]["batches"]
     splits = config["matrix"]["split_k_candidates"]
     if not batches or not splits or any(value <= 0 for value in batches + splits):
         raise ValueError("Batch sizes and Split-K candidates must be positive")
-
-    model_ids: set[str] = set()
+    seen_models: set[str] = set()
     for model in config["models"]:
-        model_id = model["id"]
-        if model_id in model_ids:
-            raise ValueError(f"Duplicate model id: {model_id}")
-        model_ids.add(model_id)
-        layer_ids: set[str] = set()
+        if model["id"] in seen_models:
+            raise ValueError(f"Duplicate model id: {model['id']}")
+        seen_models.add(model["id"])
+        seen_layers: set[str] = set()
         for layer in model["layers"]:
-            if layer["id"] in layer_ids:
-                raise ValueError(f"Duplicate layer id: {model_id}/{layer['id']}")
-            layer_ids.add(layer["id"])
+            if layer["id"] in seen_layers:
+                raise ValueError(f"Duplicate layer id: {model['id']}/{layer['id']}")
+            seen_layers.add(layer["id"])
             if layer["M"] <= 0 or layer["K"] <= 0:
-                raise ValueError(f"Invalid shape: {model_id}/{layer['id']}")
+                raise ValueError(f"Invalid shape: {model['id']}/{layer['id']}")
             if layer["M"] % 64 or layer["K"] % 64:
                 raise ValueError(
                     f"ZipGEMM requires M and K divisible by 64: "
-                    f"{model_id}/{layer['id']}={layer['M']}x{layer['K']}"
+                    f"{model['id']}/{layer['id']}={layer['M']}x{layer['K']}"
                 )
     return config
 
@@ -90,16 +104,15 @@ def selected_shapes(
     enabled = [model for model in config["models"] if model.get("enabled", True)]
     model_ids = select_values((model["id"] for model in enabled), models, "models")
     requested_layers = set(layers) if layers else None
-    known_layers = {layer["id"] for model in enabled for layer in model["layers"]}
-    if requested_layers:
-        unknown = sorted(requested_layers - known_layers)
-        if unknown:
-            raise ValueError(f"Unknown layers: {unknown}; available={sorted(known_layers)}")
-
     shapes = []
     for model in enabled:
         if model["id"] not in model_ids:
             continue
+        available_layers = {layer["id"] for layer in model["layers"]}
+        if requested_layers:
+            unknown = sorted(requested_layers - available_layers)
+            if unknown:
+                raise ValueError(f"Unknown layers for {model['id']}: {unknown}")
         for layer in model["layers"]:
             if requested_layers is None or layer["id"] in requested_layers:
                 shapes.append((model["id"], layer["id"], layer["M"], layer["K"]))
@@ -122,15 +135,60 @@ def make_tune_cases(
     return cases[: args.max_cases] if args.max_cases else cases
 
 
+def read_selected_splitk(path: Path) -> list[dict[str, str]]:
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"Split-K tuning result not found: {path}. "
+            "Run slurm/run_zipserv.sh --mode tune first."
+        )
+    with path.open(newline="", encoding="utf-8") as handle:
+        return list(csv.DictReader(handle))
+
+
+def make_run_cases(
+    config: dict[str, Any], shapes: list[tuple[str, str, int, int]],
+    selection_file: Path, args: argparse.Namespace,
+) -> list[Case]:
+    batches = set(select_values(config["matrix"]["batches"], args.batches, "batches"))
+    trials = config["phases"]["final"]["trials"]
+    selected: dict[tuple[str, str, int, int, int], int] = {}
+    for row in read_selected_splitk(selection_file):
+        key = (row["model"], row["layer"], int(row["M"]), int(row["K"]), int(row["N"]))
+        selected[key] = int(row["split_k"])
+    cases, missing = [], []
+    for model, layer, m, k in shapes:
+        for n in sorted(batches):
+            key = (model, layer, m, k, n)
+            if key not in selected:
+                missing.append(f"{model}/{layer} M={m} K={k} N={n}")
+                continue
+            cases.extend(
+                Case(model, layer, m, k, n, selected[key], trial)
+                for trial in range(1, trials + 1)
+            )
+    if missing:
+        raise RuntimeError(
+            f"{selection_file} is missing {len(missing)} requested tuning selection(s):\n"
+            + "\n".join(missing[:20])
+        )
+    return cases[: args.max_cases] if args.max_cases else cases
+
+
+def runtime_env(config: dict[str, Any]) -> dict[str, str]:
+    env = os.environ.copy()
+    cuda_path = Path(os.environ.get("CUDA_PATH", config["paths"]["cuda_path"]))
+    env["CUDA_PATH"] = str(cuda_path)
+    env["CUDA_HOME"] = str(cuda_path)
+    env["PATH"] = f"{cuda_path / 'bin'}:{env.get('PATH', '')}"
+    env["LD_LIBRARY_PATH"] = f"{PROJECT_ROOT / 'bin'}:{cuda_path / 'lib64'}"
+    env.pop("LD_PRELOAD", None)
+    return env
+
+
 def run_checked(command: list[str], env: dict[str, str], timeout: int = 30) -> str:
     completed = subprocess.run(
-        command,
-        env=env,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        timeout=timeout,
-        check=False,
+        command, env=env, text=True, stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT, timeout=timeout, check=False,
     )
     output = completed.stdout or ""
     if completed.returncode != 0:
@@ -138,43 +196,19 @@ def run_checked(command: list[str], env: dict[str, str], timeout: int = 30) -> s
     return output
 
 
-def runtime_env(config: dict[str, Any]) -> dict[str, str]:
-    env = os.environ.copy()
-    cuda_path = Path(os.environ.get("CUDA_PATH", config["paths"]["cuda_path"]))
-    bin_dir = PROJECT_ROOT / "bin"
-    env["CUDA_PATH"] = str(cuda_path)
-    env["CUDA_HOME"] = str(cuda_path)
-    env["PATH"] = f"{cuda_path / 'bin'}:{env.get('PATH', '')}"
-    env["LD_LIBRARY_PATH"] = f"{bin_dir}:{cuda_path / 'lib64'}"
-    env.pop("LD_PRELOAD", None)
-    return env
-
-
 def preflight(config: dict[str, Any], env: dict[str, str], args: argparse.Namespace) -> str:
     host = socket.gethostname().split(".")[0]
-    bad_nodes = set(config["gpu"].get("known_bad_nodes", []))
-    if host in bad_nodes and not args.allow_known_bad_node:
-        raise RuntimeError(
-            f"{host} is listed as a known-bad CUDA node. Reallocate with "
-            f"--exclude={host}, or pass --allow-known-bad-node only after it is repaired."
-        )
-
-    cuda_path = Path(env["CUDA_PATH"])
-    device_query = cuda_path / "extras" / "demo_suite" / "deviceQuery"
+    if host in set(config["gpu"].get("known_bad_nodes", [])) and not args.allow_known_bad_node:
+        raise RuntimeError(f"{host} is a known-bad CUDA node")
+    device_query = Path(env["CUDA_PATH"]) / "extras" / "demo_suite" / "deviceQuery"
     if not device_query.is_file():
         raise FileNotFoundError(f"deviceQuery not found: {device_query}")
     output = run_checked([str(device_query)], env, timeout=60)
     if "Result = PASS" not in output:
         raise RuntimeError(f"CUDA deviceQuery did not pass:\n{output}")
-
     smi = run_checked(
-        [
-            "nvidia-smi",
-            "--query-gpu=name,uuid,compute_cap,driver_version,memory.total",
-            "--format=csv,noheader",
-        ],
-        env,
-        timeout=30,
+        ["nvidia-smi", "--query-gpu=name,uuid,compute_cap,driver_version,memory.total",
+         "--format=csv,noheader"], env,
     ).strip()
     expected = config["gpu"].get("expected_name_substring")
     if expected and expected not in smi:
@@ -184,113 +218,52 @@ def preflight(config: dict[str, Any], env: dict[str, str], args: argparse.Namesp
 
 
 def ensure_binaries(config: dict[str, Any]) -> None:
-    expected = {
-        "tune": PROJECT_ROOT / "bin" / "test_mm_tune",
-        "final": PROJECT_ROOT / "bin" / "test_mm_final",
-        "library": PROJECT_ROOT / "bin" / "libL_API.so",
-        "manifest": PROJECT_ROOT / "bin" / "build_manifest.txt",
-    }
-    missing = [str(path) for path in expected.values() if not path.is_file()]
+    paths = [
+        PROJECT_ROOT / "bin" / "test_mm_tune", PROJECT_ROOT / "bin" / "test_mm_final",
+        PROJECT_ROOT / "bin" / "libL_API.so", PROJECT_ROOT / "bin" / "build_manifest.txt",
+    ]
+    missing = [str(path) for path in paths if not path.is_file()]
     if missing:
-        raise FileNotFoundError(
-            "Benchmark binaries are missing. Run scripts/build_benchmarks.sh first:\n"
-            + "\n".join(missing)
-        )
-
-    manifest: dict[str, str] = {}
-    for line in expected["manifest"].read_text(encoding="utf-8").splitlines():
+        raise FileNotFoundError("Missing benchmark binaries:\n" + "\n".join(missing))
+    manifest = {}
+    for line in paths[-1].read_text(encoding="utf-8").splitlines():
         if "=" in line:
             key, value = line.split("=", 1)
             manifest[key] = value
     for phase in ("tune", "final"):
         for metric in ("warmup", "repeat"):
-            expected_value = str(config["phases"][phase][metric])
             key = f"{phase}_{metric}"
-            if manifest.get(key) != expected_value:
-                raise RuntimeError(
-                    f"Binary manifest has {key}={manifest.get(key)!r}, expected "
-                    f"{expected_value}. Re-run scripts/build_benchmarks.sh."
-                )
+            expected = str(config["phases"][phase][metric])
+            if manifest.get(key) != expected:
+                raise RuntimeError(f"Binary manifest has {key}={manifest.get(key)!r}, expected {expected}")
 
 
 def command_output(command: list[str], env: dict[str, str]) -> str:
     try:
-        completed = subprocess.run(
-            command,
-            env=env,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            timeout=30,
-            check=False,
-        )
-        return (completed.stdout or "").strip()
-    except Exception as error:  # environment capture must not abort a run
+        return run_checked(command, env).strip()
+    except Exception as error:
         return f"ERROR: {error}"
 
 
-def write_run_manifest(
-    output_dir: Path,
-    config_path: Path,
-    config: dict[str, Any],
-    args: argparse.Namespace,
-    env: dict[str, str],
-    device_query_output: str,
+def write_manifest(
+    output_dir: Path, config_path: Path, config: dict[str, Any], args: argparse.Namespace,
+    env: dict[str, str], device_query: str,
 ) -> None:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    config_bytes = config_path.read_bytes()
     zip_root = Path(os.environ.get("ZIP_ROOT", config["paths"]["zipserv_source"]))
-    environment_sections = [
-        ("timestamp", utc_now()),
-        ("host", socket.gethostname()),
-        ("platform", platform.platform()),
-        ("slurm_job_id", os.environ.get("SLURM_JOB_ID", "UNSET")),
-        ("cuda_visible_devices", os.environ.get("CUDA_VISIBLE_DEVICES", "UNSET")),
-        ("nvidia-smi", command_output(["nvidia-smi"], env)),
-        ("nvcc --version", command_output([str(Path(env["CUDA_PATH"]) / "bin" / "nvcc"), "--version"], env)),
-        ("deviceQuery", device_query_output),
-        ("ZipServ commit", command_output(["git", "-C", str(zip_root), "rev-parse", "HEAD"], env)),
-        ("ZipServ status", command_output(["git", "-C", str(zip_root), "status", "--short"], env)),
-        ("experiment commit", command_output(["git", "-C", str(PROJECT_ROOT.parent), "rev-parse", "HEAD"], env)),
-        ("build manifest", (PROJECT_ROOT / "bin" / "build_manifest.txt").read_text(encoding="utf-8")),
-    ]
-    environment_text = "\n\n".join(f"## {title}\n{body}" for title, body in environment_sections)
-    (output_dir / "environment.txt").write_text(environment_text + "\n", encoding="utf-8")
-
     manifest = {
-        "created_at": utc_now(),
-        "config_path": str(config_path),
-        "config_sha256": hashlib.sha256(config_bytes).hexdigest(),
-        "command": sys.argv,
-        "mode": args.mode,
-        "filters": {
-            "models": args.models,
-            "layers": args.layers,
-            "batches": args.batches,
-            "splits": args.splits,
-            "max_cases": args.max_cases,
-        },
-        "input": config["input"],
-        "matrix": config["matrix"],
-        "phases": config["phases"],
+        "created_at": utc_now(), "command": sys.argv, "mode": args.mode,
+        "config_sha256": hashlib.sha256(config_path.read_bytes()).hexdigest(),
+        "host": socket.gethostname(), "platform": platform.platform(),
+        "slurm_job_id": os.environ.get("SLURM_JOB_ID", "UNSET"),
+        "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES", "UNSET"),
+        "zipserv_commit": command_output(["git", "-C", str(zip_root), "rev-parse", "HEAD"], env),
+        "device_query": device_query, "input": config["input"],
+        "matrix": config["matrix"], "phases": config["phases"],
     }
     (output_dir / "manifest.json").write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
     shutil.copy2(config_path, output_dir / "experiments.json")
-
-
-def case_dir(output_dir: Path, phase: str, case: Case) -> Path:
-    return (
-        output_dir
-        / "raw"
-        / phase
-        / case.model
-        / case.layer
-        / f"n{case.n}"
-        / f"split{case.split_k}"
-        / f"trial{case.trial}"
-    )
 
 
 def parse_float(pattern: str, text: str) -> float | None:
@@ -300,402 +273,182 @@ def parse_float(pattern: str, text: str) -> float | None:
 
 def parse_metrics(csv_path: Path, log_text: str) -> dict[str, Any]:
     metrics: dict[str, Any] = {}
-    kernel_names = {
-        "cuBLAS": "cublas",
-        "cuBLAS_TC": "cublas_tc",
-        "CompGEMM": "zipgemm",
-    }
+    names = {"cuBLAS": "cublas", "cuBLAS_TC": "cublas_tc", "CompGEMM": "zipgemm"}
     if csv_path.is_file():
         with csv_path.open(newline="", encoding="utf-8") as handle:
             for row in csv.DictReader(handle):
-                key = kernel_names.get(row["Kernel"])
+                key = names.get(row["Kernel"])
                 if key:
                     metrics[key] = {
                         "latency_ms": float(row["Duration(ms)"]),
                         "tflops": float(row["TFLOPS"]),
                     }
-
     metrics["compression_ratio"] = parse_float(
         r"^\s*Compression ratio:\s*([0-9.eE+-]+)x\s*$", log_text
     )
-    tc_block = re.search(
-        r"Triple bitmap vs TC CuBLAS:\s*(.*?)\n\s*========== Performance Results",
-        log_text,
-        flags=re.DOTALL,
+    comparisons = (
+        (
+            "tc_vs_non_tc",
+            r"CuBLAS TC vs non-TC comparison results:\s*(.*?)\n\s*(?:==========|Running BF16)",
+        ),
+        (
+            "zip_vs_non_tc",
+            r"Triple bitmap vs non-TC CuBLAS:\s*(.*?)\n\s*Triple bitmap vs TC CuBLAS:",
+        ),
+        (
+            "zip_vs_tc",
+            r"Triple bitmap vs TC CuBLAS:\s*(.*?)\n\s*(?:Error samples|========== Performance Results)",
+        ),
     )
-    if tc_block:
-        block = tc_block.group(1)
-        metrics["zip_vs_cublas_tc"] = {
-            "total_absolute_error": parse_float(r"Total absolute error:\s*([0-9.eE+-]+)", block),
-            "max_relative_error": parse_float(r"Max relative error:\s*([0-9.eE+-]+)", block),
-            "average_relative_error": parse_float(r"Average relative error:\s*([0-9.eE+-]+)", block),
-            "significant_error_count": int(
-                parse_float(r"Significant error element count:\s*([0-9]+)", block) or 0
-            ),
-            "significant_error_percent": parse_float(
-                r"Significant error element count:.*?\(([0-9.eE+-]+)%\)", block
-            ),
-        }
+    for prefix, pattern in comparisons:
+        match = re.search(pattern, log_text, flags=re.DOTALL)
+        if not match:
+            continue
+        block = match.group(1)
+        metrics[f"{prefix}_total_absolute_error"] = parse_float(
+            r"Total absolute error:\s*([0-9.eE+-]+)", block
+        )
+        metrics[f"{prefix}_max_relative_error"] = parse_float(
+            r"Max relative error:\s*([0-9.eE+-]+)", block
+        )
+        metrics[f"{prefix}_average_relative_error"] = parse_float(
+            r"Average relative error:\s*([0-9.eE+-]+)", block
+        )
+        metrics[f"{prefix}_significant_error_count"] = int(
+            parse_float(r"Significant error element count:\s*([0-9]+)", block) or 0
+        )
+        metrics[f"{prefix}_significant_error_percent"] = parse_float(
+            r"Significant error element count:.*?\(([0-9.eE+-]+)%\)", block
+        )
     return metrics
 
 
-def execute_case(
-    output_dir: Path,
-    phase: str,
-    case: Case,
-    config: dict[str, Any],
-    env: dict[str, str],
-    force: bool,
-) -> tuple[dict[str, Any], bool, bool]:
-    work_dir = case_dir(output_dir, phase, case)
-    work_dir.mkdir(parents=True, exist_ok=True)
-    result_path = work_dir / "result.json"
-    replaces_existing = result_path.is_file()
-    if result_path.is_file() and not force:
-        with result_path.open(encoding="utf-8") as handle:
-            existing = json.load(handle)
-        if existing.get("status") == "ok":
-            print(f"SKIP {phase} {case.model}/{case.layer} N={case.n} split={case.split_k} trial={case.trial}")
-            return existing, False, False
-
-    binary = PROJECT_ROOT / "bin" / f"test_mm_{phase}"
-    command = [
-        str(binary),
-        str(case.m),
-        str(case.k),
-        str(case.n),
-        str(case.split_k),
-        "--model",
-        case.model,
-        "--layer",
-        case.layer,
-    ]
-    # Never parse a CSV left by an earlier failed or interrupted attempt.
-    (work_dir / "bf16_triplebm_res.csv").unlink(missing_ok=True)
-    started_at = utc_now()
-    start = time.monotonic()
-    status = "failed"
-    error = ""
-    returncode: int | None = None
-    log_text = ""
-    try:
-        completed = subprocess.run(
-            command,
-            cwd=work_dir,
-            env=env,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            timeout=config["timeout_seconds"],
-            check=False,
-        )
-        returncode = completed.returncode
-        log_text = completed.stdout or ""
-        if returncode != 0:
-            error = f"benchmark exited with status {returncode}"
-        elif "========== Test Complete ==========" not in log_text:
-            error = "completion marker missing from benchmark output"
-        else:
-            status = "ok"
-    except subprocess.TimeoutExpired as exc:
-        status = "timeout"
-        error = f"timed out after {config['timeout_seconds']} seconds"
-        stdout = exc.stdout or ""
-        log_text = stdout.decode(errors="replace") if isinstance(stdout, bytes) else stdout
-    except Exception as exc:
-        error = f"{type(exc).__name__}: {exc}"
-
-    (work_dir / "run.log").write_text(log_text, encoding="utf-8")
-    temporary_csv = work_dir / "bf16_triplebm_res.csv"
-    metrics = parse_metrics(temporary_csv, log_text)
-    # test_mm always writes this file. Its rows are copied into the run-level
-    # measurements.csv below, so do not retain one CSV for every case.
-    temporary_csv.unlink(missing_ok=True)
-    required = {"cublas", "cublas_tc", "zipgemm"}
-    if status == "ok" and not required.issubset(metrics):
-        status = "failed"
-        error = f"missing performance rows: {sorted(required - set(metrics))}"
-
-    phase_settings = config["phases"][phase]
-    result = {
-        "status": status,
-        "error": error,
-        "phase": phase,
-        "started_at": started_at,
-        "finished_at": utc_now(),
-        "wall_seconds": time.monotonic() - start,
-        "returncode": returncode,
-        "command": command,
-        "model": case.model,
-        "layer": case.layer,
-        "M": case.m,
-        "K": case.k,
-        "N": case.n,
-        "split_k": case.split_k,
-        "trial": case.trial,
-        "warmup": phase_settings["warmup"],
-        "repeat": phase_settings["repeat"],
-        "weight_source": config["input"]["weight_source"],
-        "seed": config["input"]["seed"],
-        "metrics": metrics,
-        "log": str((work_dir / "run.log").relative_to(output_dir)),
-    }
-    result_path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-
-    if status == "ok":
-        tc_ms = metrics["cublas_tc"]["latency_ms"]
-        zip_ms = metrics["zipgemm"]["latency_ms"]
-        print(
-            f"OK   {phase} {case.model}/{case.layer} N={case.n} split={case.split_k} "
-            f"trial={case.trial}: Zip={zip_ms:.6f} ms TC={tc_ms:.6f} ms "
-            f"speedup={tc_ms / zip_ms:.3f}x",
-            flush=True,
-        )
-    else:
-        print(
-            f"FAIL {phase} {case.model}/{case.layer} N={case.n} split={case.split_k} "
-            f"trial={case.trial}: {error}",
-            file=sys.stderr,
-            flush=True,
-        )
-    return result, True, replaces_existing
+KEY_FIELDS = ("phase", "model", "layer", "M", "K", "N", "split_k", "trial")
 
 
-def load_results(output_dir: Path, phase: str | None = None) -> list[dict[str, Any]]:
-    root = output_dir / "raw"
-    if phase:
-        root = root / phase
-    results = []
-    if not root.exists():
-        return results
-    for path in sorted(root.rglob("result.json")):
-        with path.open(encoding="utf-8") as handle:
-            results.append(json.load(handle))
-    return results
+def row_key(row: dict[str, Any]) -> tuple[str, ...]:
+    return tuple(str(row[field]) for field in KEY_FIELDS)
 
 
-def remove_case_csvs(output_dir: Path) -> int:
-    """Remove test_mm CSVs after their data has been captured in result.json."""
-    raw_root = output_dir / "raw"
-    if not raw_root.exists():
-        return 0
-    paths = list(raw_root.rglob("bf16_triplebm_res.csv"))
-    for path in paths:
-        path.unlink(missing_ok=True)
-    return len(paths)
+def case_key(phase: str, case: Case) -> tuple[str, ...]:
+    return tuple(map(str, (phase, case.model, case.layer, case.m, case.k, case.n, case.split_k, case.trial)))
 
 
-MEASUREMENT_FIELDS = [
-    "phase", "status", "error", "model", "layer", "M", "K", "N", "split_k",
-    "trial", "warmup", "repeat", "weight_source", "seed", "kernel", "latency_ms",
-    "tflops", "compression_ratio", "total_absolute_error", "max_relative_error",
-    "average_relative_error", "significant_error_count", "significant_error_percent",
-    "wall_seconds", "log",
-]
-
-
-def measurement_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
-    base = {key: result.get(key, "") for key in MEASUREMENT_FIELDS}
-    error_metrics = result.get("metrics", {}).get("zip_vs_cublas_tc", {})
-    base.update(error_metrics)
-    base["compression_ratio"] = result.get("metrics", {}).get("compression_ratio", "")
-    if result["status"] != "ok":
-        return [base]
-
-    rows = []
-    # cuBLAS non-TC remains available in result.json, but is outside the
-    # experiment's main cuBLAS Tensor Core vs ZipGEMM comparison.
-    for kernel in ("cublas_tc", "zipgemm"):
-        row = base.copy()
-        row["kernel"] = kernel
-        row.update(result["metrics"][kernel])
-        rows.append(row)
-    return rows
-
-
-def append_measurement(output_dir: Path, result: dict[str, Any]) -> None:
-    """Durably append a completed case to the single run-level CSV."""
-    path = output_dir / "measurements.csv"
-    needs_header = not path.is_file() or path.stat().st_size == 0
-    with path.open("a", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=MEASUREMENT_FIELDS)
-        if needs_header:
-            writer.writeheader()
-        writer.writerows(measurement_rows(result))
-        handle.flush()
-        os.fsync(handle.fileno())
-
-
-def write_measurements(output_dir: Path) -> None:
-    rows: list[dict[str, Any]] = []
-    for result in load_results(output_dir):
-        rows.extend(measurement_rows(result))
-
-    measurements_path = output_dir / "measurements.csv"
-    measurements_tmp = output_dir / ".measurements.csv.tmp"
-    with measurements_tmp.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=MEASUREMENT_FIELDS)
-        writer.writeheader()
-        writer.writerows(rows)
-        handle.flush()
-        os.fsync(handle.fileno())
-    os.replace(measurements_tmp, measurements_path)
-
-    failure_fields = [
-        "phase", "model", "layer", "M", "K", "N", "split_k", "trial", "status", "error", "log"
-    ]
-    failures = [result for result in load_results(output_dir) if result["status"] != "ok"]
-    with (output_dir / "failures.csv").open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=failure_fields, extrasaction="ignore")
-        writer.writeheader()
-        writer.writerows(failures)
-
-
-def choose_split_k(output_dir: Path, config: dict[str, Any]) -> list[dict[str, Any]]:
-    expected_trials = config["phases"]["tune"]["trials"]
-    grouped: dict[tuple[str, str, int, int, int], list[dict[str, Any]]] = {}
-    for result in load_results(output_dir, "tune"):
-        if result["status"] != "ok":
-            continue
-        key = (result["model"], result["layer"], result["M"], result["K"], result["N"])
-        grouped.setdefault(key, []).append(result)
-
-    selections: list[dict[str, Any]] = []
-    for key, group in sorted(grouped.items()):
-        by_split: dict[int, list[float]] = {}
-        for result in group:
-            by_split.setdefault(result["split_k"], []).append(
-                result["metrics"]["zipgemm"]["latency_ms"]
-            )
-        candidates = []
-        for split_k, values in by_split.items():
-            if len(values) == expected_trials and all(math.isfinite(value) and value > 0 for value in values):
-                candidates.append((statistics.median(values), split_k, values))
-        if not candidates:
-            continue
-        median_ms, split_k, values = min(candidates, key=lambda item: (item[0], item[1]))
-        selections.append(
-            {
-                "model": key[0],
-                "layer": key[1],
-                "M": key[2],
-                "K": key[3],
-                "N": key[4],
-                "split_k": split_k,
-                "median_zipgemm_ms": median_ms,
-                "trial_count": len(values),
-                "candidate_count": len(candidates),
-            }
-        )
-
-    fields = [
-        "model", "layer", "M", "K", "N", "split_k", "median_zipgemm_ms",
-        "trial_count", "candidate_count",
-    ]
-    with (output_dir / "selected_splitk.csv").open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fields)
-        writer.writeheader()
-        writer.writerows(selections)
-    return selections
-
-
-def read_selections(output_dir: Path) -> list[dict[str, Any]]:
-    path = output_dir / "selected_splitk.csv"
+def load_rows(path: Path) -> list[dict[str, str]]:
     if not path.is_file():
-        raise FileNotFoundError(
-            f"{path} is missing. Run tune first in the same --output-dir, or use --mode all."
-        )
+        return []
     with path.open(newline="", encoding="utf-8") as handle:
         return list(csv.DictReader(handle))
 
 
-def make_final_cases(
-    output_dir: Path,
-    config: dict[str, Any],
-    shapes: list[tuple[str, str, int, int]],
-    args: argparse.Namespace,
-) -> list[Case]:
-    allowed_shapes = {(model, layer, m, k) for model, layer, m, k in shapes}
-    batches = set(select_values(config["matrix"]["batches"], args.batches, "batches"))
-    trials = config["phases"]["final"]["trials"]
-    cases = []
-    for row in read_selections(output_dir):
-        shape = (row["model"], row["layer"], int(row["M"]), int(row["K"]))
-        if shape not in allowed_shapes or int(row["N"]) not in batches:
-            continue
-        cases.extend(
-            Case(*shape, int(row["N"]), int(row["split_k"]), trial)
-            for trial in range(1, trials + 1)
-        )
-    return cases[: args.max_cases] if args.max_cases else cases
-
-
-def write_summary(output_dir: Path) -> None:
-    grouped: dict[tuple[str, str, int, int, int, int], list[dict[str, Any]]] = {}
-    for result in load_results(output_dir, "final"):
-        if result["status"] != "ok":
-            continue
-        key = (
-            result["model"], result["layer"], result["M"], result["K"],
-            result["N"], result["split_k"],
-        )
-        grouped.setdefault(key, []).append(result)
-
-    rows = []
-    for key, results in sorted(grouped.items()):
-        zip_values = [result["metrics"]["zipgemm"]["latency_ms"] for result in results]
-        tc_values = [result["metrics"]["cublas_tc"]["latency_ms"] for result in results]
-        zip_ms = statistics.median(zip_values)
-        tc_ms = statistics.median(tc_values)
-        rows.append(
-            {
-                "model": key[0],
-                "layer": key[1],
-                "M": key[2],
-                "K": key[3],
-                "N": key[4],
-                "split_k": key[5],
-                "trials": len(results),
-                "zipgemm_median_ms": zip_ms,
-                "cublas_tc_median_ms": tc_ms,
-                "speedup_vs_cublas_tc": tc_ms / zip_ms,
-                "compression_ratio": statistics.median(
-                    result["metrics"]["compression_ratio"] for result in results
-                ),
-            }
-        )
-    fields = [
-        "model", "layer", "M", "K", "N", "split_k", "trials",
-        "zipgemm_median_ms", "cublas_tc_median_ms", "speedup_vs_cublas_tc",
-        "compression_ratio",
-    ]
-    with (output_dir / "summary.csv").open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fields)
+def write_rows(path: Path, rows: list[dict[str, Any]]) -> None:
+    temporary = path.with_name(f".{path.name}.tmp")
+    with temporary.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=RESULT_FIELDS, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(rows)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temporary, path)
 
 
-def default_output_dir() -> Path:
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    suffix = os.environ.get("SLURM_JOB_ID", f"interactive-{os.getpid()}")
-    return PROJECT_ROOT / "results" / f"run-{timestamp}-{suffix}"
+def append_log(path: Path, phase: str, case: Case, status: str, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(
+            f"\n===== CASE START phase={phase} model={case.model} layer={case.layer} "
+            f"M={case.m} K={case.k} N={case.n} split_k={case.split_k} trial={case.trial} =====\n"
+        )
+        handle.write(text)
+        if text and not text.endswith("\n"):
+            handle.write("\n")
+        handle.write(f"===== CASE END status={status} =====\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+def execute_case(
+    phase: str, case: Case, config: dict[str, Any], env: dict[str, str], log_file: Path,
+) -> dict[str, Any]:
+    binary_phase = "tune" if phase == "tune" else "final"
+    command = [
+        str(PROJECT_ROOT / "bin" / f"test_mm_{binary_phase}"),
+        str(case.m), str(case.k), str(case.n), str(case.split_k),
+        "--model", case.model, "--layer", case.layer,
+    ]
+    started_at, start = utc_now(), time.monotonic()
+    status, error, returncode, log_text = "failed", "", None, ""
+    metrics: dict[str, Any] = {}
+    with tempfile.TemporaryDirectory(prefix=f"zipserv-{case.model}-") as work:
+        work_dir = Path(work)
+        try:
+            completed = subprocess.run(
+                command, cwd=work_dir, env=env, text=True, stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT, timeout=config["timeout_seconds"], check=False,
+            )
+            returncode, log_text = completed.returncode, completed.stdout or ""
+            if returncode != 0:
+                error = f"benchmark exited with status {returncode}"
+            elif "========== Test Complete ==========" not in log_text:
+                error = "completion marker missing from benchmark output"
+            else:
+                status = "ok"
+        except subprocess.TimeoutExpired as exc:
+            status, error = "timeout", f"timed out after {config['timeout_seconds']} seconds"
+            stdout = exc.stdout or ""
+            log_text = stdout.decode(errors="replace") if isinstance(stdout, bytes) else stdout
+        except Exception as exc:
+            error = f"{type(exc).__name__}: {exc}"
+        metrics = parse_metrics(work_dir / "bf16_triplebm_res.csv", log_text)
+    required = {"cublas", "cublas_tc", "zipgemm"}
+    if status == "ok" and not required.issubset(metrics):
+        status, error = "failed", f"missing performance rows: {sorted(required - set(metrics))}"
+    append_log(log_file, phase, case, status, log_text)
+
+    settings = config["phases"][binary_phase]
+    row: dict[str, Any] = {field: "" for field in RESULT_FIELDS}
+    row.update({
+        "phase": phase, "status": status, "error": error, "started_at": started_at,
+        "finished_at": utc_now(), "wall_seconds": time.monotonic() - start,
+        "returncode": "" if returncode is None else returncode, "model": case.model,
+        "layer": case.layer, "M": case.m, "K": case.k, "N": case.n,
+        "split_k": case.split_k, "trial": case.trial, "warmup": settings["warmup"],
+        "repeat": settings["repeat"], "weight_source": config["input"]["weight_source"],
+        "seed": config["input"]["seed"], "compression_ratio": metrics.get("compression_ratio", ""),
+        "log_file": str(log_file),
+    })
+    for kernel in ("cublas", "cublas_tc", "zipgemm"):
+        values = metrics.get(kernel, {})
+        row[f"{kernel}_latency_ms"] = values.get("latency_ms", "")
+        row[f"{kernel}_tflops"] = values.get("tflops", "")
+    if required.issubset(metrics):
+        non_tc_ms = metrics["cublas"]["latency_ms"]
+        tc_ms = metrics["cublas_tc"]["latency_ms"]
+        zip_ms = metrics["zipgemm"]["latency_ms"]
+        row["tc_speedup_vs_non_tc"] = non_tc_ms / tc_ms
+        row["zipgemm_speedup_vs_non_tc"] = non_tc_ms / zip_ms
+        row["zipgemm_speedup_vs_tc"] = tc_ms / zip_ms
+    for field in RESULT_FIELDS:
+        if field in metrics:
+            row[field] = metrics[field]
+    return row
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Tune Split-K and run the ZipServ ZipGEMM vs cuBLAS experiment."
-    )
+    parser = argparse.ArgumentParser(description="Run one model's ZipServ experiment")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
-    parser.add_argument("--mode", choices=("dry-run", "tune", "final", "all", "collect"), default="all")
+    parser.add_argument("--mode", choices=("dry-run", "tune", "run"), default="run")
     parser.add_argument("--output-dir", type=Path)
+    parser.add_argument("--selection-file", type=Path)
+    parser.add_argument("--log-file", type=Path)
     parser.add_argument("--models", nargs="+")
     parser.add_argument("--layers", nargs="+")
     parser.add_argument("--batches", nargs="+", type=int)
     parser.add_argument("--splits", nargs="+", type=int)
-    parser.add_argument("--max-cases", type=int, help="Debug aid: run at most this many cases per phase")
-    parser.add_argument("--force", action="store_true", help="Re-run successful cases")
+    parser.add_argument("--max-cases", type=int)
+    parser.add_argument("--force", action="store_true")
     parser.add_argument("--fail-fast", action="store_true")
-    parser.add_argument("--skip-device-check", action="store_true", help="Only for harness debugging")
+    parser.add_argument("--skip-device-check", action="store_true")
     parser.add_argument("--allow-known-bad-node", action="store_true")
     return parser.parse_args()
 
@@ -705,91 +458,54 @@ def main() -> int:
     config_path = args.config.expanduser().resolve()
     config = load_config(config_path)
     shapes = selected_shapes(config, args.models, args.layers)
-    tune_cases = make_tune_cases(config, shapes, args)
-    final_points = len(shapes) * len(
-        select_values(config["matrix"]["batches"], args.batches, "batches")
-    )
-
-    print(
-        f"Selected {len(shapes)} layer shapes; tune invocations={len(tune_cases)}; "
-        f"expected final points={final_points}",
-        flush=True,
-    )
-    if args.mode == "dry-run":
-        print("Configuration is valid. No GPU work was started.")
+    if args.mode == "tune":
+        cases, phase = make_tune_cases(config, shapes, args), "tune"
+    elif args.mode == "run":
+        if args.selection_file is None:
+            raise ValueError("--selection-file is required for --mode run")
+        cases = make_run_cases(config, shapes, args.selection_file.expanduser().resolve(), args)
+        phase = "run"
+    else:
+        tune_count = len(make_tune_cases(config, shapes, args))
+        run_points = len(shapes) * len(select_values(config["matrix"]["batches"], args.batches, "batches"))
+        print(f"Configuration valid: shapes={len(shapes)} tune_cases={tune_count} run_points={run_points}")
         return 0
 
-    if args.mode in {"final", "collect"} and args.output_dir is None:
-        raise ValueError(f"--output-dir is required for --mode {args.mode}")
-    output_dir = (args.output_dir or default_output_dir()).expanduser().resolve()
+    if args.output_dir is None or args.log_file is None:
+        raise ValueError("--output-dir and --log-file are required")
+    output_dir, log_file = args.output_dir.expanduser().resolve(), args.log_file.expanduser().resolve()
+    result_file = output_dir / "result.csv"
     output_dir.mkdir(parents=True, exist_ok=True)
-
-    if args.mode == "collect":
-        write_measurements(output_dir)
-        removed = remove_case_csvs(output_dir)
-        if (output_dir / "selected_splitk.csv").is_file():
-            write_summary(output_dir)
-        print(f"Collected results in {output_dir}; removed {removed} per-case CSV file(s)")
-        return 0
-
     ensure_binaries(config)
     env = runtime_env(config)
-    device_query_output = "SKIPPED"
-    if not args.skip_device_check:
-        device_query_output = preflight(config, env, args)
-    if not (output_dir / "manifest.json").exists():
-        write_run_manifest(output_dir, config_path, config, args, env, device_query_output)
-    # Reconstruct once when starting/resuming. Thereafter each completed case is
-    # appended immediately, so a Slurm timeout does not lose completed rows.
-    write_measurements(output_dir)
-    removed = remove_case_csvs(output_dir)
-    if removed:
-        print(f"Removed {removed} legacy per-case CSV file(s).", flush=True)
-    print(f"Results: {output_dir}", flush=True)
+    device_query = "SKIPPED" if args.skip_device_check else preflight(config, env, args)
+    if not (output_dir / "manifest.json").is_file():
+        write_manifest(output_dir, config_path, config, args, env, device_query)
 
+    indexed = {row_key(row): row for row in load_rows(result_file)}
     failures = 0
-    if args.mode in {"tune", "all"}:
-        for index, case in enumerate(tune_cases, start=1):
-            print(f"[{index}/{len(tune_cases)}]", end=" ", flush=True)
-            result, executed, replaced = execute_case(
-                output_dir, "tune", case, config, env, args.force
+    print(f"Mode={phase}; cases={len(cases)}; result={result_file}; log={log_file}", flush=True)
+    for index, case in enumerate(cases, start=1):
+        key = case_key(phase, case)
+        existing = indexed.get(key)
+        if existing and existing.get("status") == "ok" and not args.force:
+            print(f"[{index}/{len(cases)}] SKIP {case.model}/{case.layer} N={case.n} split={case.split_k}", flush=True)
+            continue
+        row = execute_case(phase, case, config, env, log_file)
+        indexed[key] = row
+        write_rows(result_file, list(indexed.values()))
+        if row["status"] == "ok":
+            speedup = float(row["cublas_tc_latency_ms"]) / float(row["zipgemm_latency_ms"])
+            print(
+                f"[{index}/{len(cases)}] OK {case.model}/{case.layer} N={case.n} "
+                f"split={case.split_k} speedup={speedup:.3f}x", flush=True,
             )
-            if executed:
-                if replaced:
-                    write_measurements(output_dir)
-                else:
-                    append_measurement(output_dir, result)
-            if result["status"] != "ok":
-                failures += 1
-                if args.fail_fast:
-                    break
-        write_measurements(output_dir)
-        selections = choose_split_k(output_dir, config)
-        print(f"Selected Split-K for {len(selections)} shape/batch points.", flush=True)
-
-    if args.mode in {"final", "all"} and not (args.fail_fast and failures):
-        final_cases = make_final_cases(output_dir, config, shapes, args)
-        if not final_cases:
-            raise RuntimeError("No complete tuning selections match the requested final filters")
-        print(f"Final invocations={len(final_cases)}", flush=True)
-        for index, case in enumerate(final_cases, start=1):
-            print(f"[{index}/{len(final_cases)}]", end=" ", flush=True)
-            result, executed, replaced = execute_case(
-                output_dir, "final", case, config, env, args.force
-            )
-            if executed:
-                if replaced:
-                    write_measurements(output_dir)
-                else:
-                    append_measurement(output_dir, result)
-            if result["status"] != "ok":
-                failures += 1
-                if args.fail_fast:
-                    break
-        write_measurements(output_dir)
-        write_summary(output_dir)
-
-    print(f"Completed with {failures} failed invocation(s). Results: {output_dir}")
+        else:
+            failures += 1
+            print(f"[{index}/{len(cases)}] FAIL {case.model}/{case.layer}: {row['error']}", file=sys.stderr, flush=True)
+            if args.fail_fast:
+                break
+    print(f"Completed with {failures} failed invocation(s): {result_file}")
     return 1 if failures else 0
 
 

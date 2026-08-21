@@ -89,8 +89,14 @@ make -C "$ZIP_ROOT/build" \
   SMS="$SMS"
 cp -- "$ZIP_ROOT/build/libL_API.so" "$BIN_DIR/libL_API.so"
 
-build_variant tune "$TUNE_WARMUP" "$TUNE_REPEAT"
-build_variant final "$FINAL_WARMUP" "$FINAL_REPEAT"
+if [[ "$TUNE_WARMUP" == "$FINAL_WARMUP" && "$TUNE_REPEAT" == "$FINAL_REPEAT" ]]; then
+  build_variant tune "$TUNE_WARMUP" "$TUNE_REPEAT"
+  cp -- "$BIN_DIR/test_mm_tune" "$BIN_DIR/test_mm_final"
+  echo "Tune and final settings match; reused the same benchmark binary."
+else
+  build_variant tune "$TUNE_WARMUP" "$TUNE_REPEAT"
+  build_variant final "$FINAL_WARMUP" "$FINAL_REPEAT"
+fi
 
 restore_header
 trap - EXIT INT TERM
