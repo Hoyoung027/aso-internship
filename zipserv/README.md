@@ -247,6 +247,67 @@ raw/
 각 Slurm job과 collector는 제출 시 복사한 `experiments.json`을 사용하므로 작업이
 대기 중일 때 원본 config를 수정해도 이미 제출된 실험에는 영향을 주지 않는다.
 
+### 범용 Hugging Face safetensors 모델 추가
+
+실제 가중치 로더는 LLaMA 전용 텐서 이름을 C++에 하드코딩하지 않는다.
+`configs/experiments.json`의 `weight_layouts`가 projection별 원본 텐서 이름을
+정의하고, 각 모델의 `weight.layout`이 사용할 layout을 선택한다. `{block}`은
+실행 시 `--blocks` 또는 `weight.block_index` 값으로 치환된다.
+
+```json
+"weight_layouts": {
+  "hf_llama_qwen_decoder": {
+    "qkv_proj": [
+      "model.layers.{block}.self_attn.q_proj.weight",
+      "model.layers.{block}.self_attn.k_proj.weight",
+      "model.layers.{block}.self_attn.v_proj.weight"
+    ],
+    "o_proj": ["model.layers.{block}.self_attn.o_proj.weight"],
+    "gateup_proj": [
+      "model.layers.{block}.mlp.gate_proj.weight",
+      "model.layers.{block}.mlp.up_proj.weight"
+    ],
+    "down_proj": ["model.layers.{block}.mlp.down_proj.weight"],
+    "lm_head": ["lm_head.weight"]
+  }
+}
+```
+
+같은 텐서 규칙을 쓰는 모델은 모델 항목에 다음 정보만 추가하면 된다.
+
+```json
+"weight": {
+  "model_dir": "/lustre/.../Model-Instruct",
+  "layout": "hf_llama_qwen_decoder",
+  "block_index": 0
+}
+```
+
+다른 이름 규칙을 쓰는 모델은 새 `weight_layouts` 항목을 만들거나 모델별
+`weight.tensors`로 일부/전체 projection을 덮어쓸 수 있다. 여러 텐서를 지정한
+`qkv_proj`와 `gateup_proj`는 목록 순서대로 row 방향으로 이어 붙이며, 최종 shape가
+각 layer의 `M × K`와 정확히 일치해야 한다. 제출 전에 index의 tensor key와 필요한
+shard 파일 존재 여부를 검사하고, 실행 중에는 BF16 dtype 및 실제 shape도 검사한다.
+여러 shard의 `model.safetensors.index.json` 형식과 단일 `model.safetensors` 형식을
+모두 지원한다.
+
+Qwen2.5 7B/14B의 first/mid/last block을 tuning 후 곧바로 final run까지 수행하는
+명령은 다음과 같다.
+
+```bash
+slurm/run_zipserv.sh \
+  --mode both \
+  --models qwen2.5-7b qwen2.5-14b \
+  --blocks qwen2.5-7b=0,14,27 qwen2.5-14b=0,24,47 \
+  --layers qkv_proj o_proj gateup_proj down_proj lm_head \
+  --time 12:00:00
+```
+
+`lm_head`는 config에서 `block_scoped: false`이므로 각 모델의 첫 번째 block job에서
+한 번만 측정된다. 나머지 네 projection은 지정한 모든 block에서 측정된다.
+`result.csv`에는 실제 `weight_layout`과 해석이 끝난 `weight_tensors` 목록도 함께
+기록된다.
+
 ## 중단 후 재개
 
 제출 시 출력된 run directory를 다시 넘긴다.
@@ -352,6 +413,33 @@ python3 plots/plot_latency_by_splitk.py
 각 모델마다 `plots/latency_by_splitk/<model>_latency_by_splitk.png`를 만든다.
 상단은 레이어별 최적 Split-K를 batch별 막대로, 중단은 다섯 레이어 각각의
 Split-K별 latency를, 하단은 Split-K=1 대비 최적 speedup을 보여준다.
+
+합성 가중치 tuning 결과에서 모든 Split-K 후보의 K=1 대비 speedup을
+비교하려면 다음을 실행한다.
+
+```bash
+python3 plots/plot_splitk_speedup.py \
+  --results-root results/zipserv-rtx4090-synthetic-20260822-tuning
+```
+
+각 모델마다
+`plots/image/synthetic/splitk_speedup/<model>_splitk_speedup.png`를 만든다.
+각 batch 패널에서 projection별 K=1/2/4/8 막대를 모두 표시하며, K=1을
+1.00배 기준선으로 사용하고 가장 빠른 Split-K를 강조한다.
+Split-K 그래프는 기본적으로 폭 3600px의 고해상도 PNG만 저장한다. 다른 해상도는
+`--png-scale 3`처럼 지정할 수 있으며, 벡터 원본이 필요한 경우에만
+`--keep-svg`를 사용한다.
+
+LLaMA 실제 가중치의 block별 exponent coverage, 압축률/저장 크기 및 cuBLAS TC 대비
+ZipServ speedup을 동일한 x축에 표시하려면 다음을 실행한다.
+
+```bash
+python3 plots/plot_real_weight_overview.py
+```
+
+8B의 block `0/16/31`과 70B의 block `0/40/79` 결과를 자동으로 찾아
+`plots/image/real/llama/<model>_real_weight_overview.png`에 폭 4800px PNG를 만든다.
+중간 SVG는 PNG 변환 후 자동으로 삭제된다.
 
 LLaMA 3.1 8B/70B의 selected Split-K 결과에 대한 수치 오차 그래프는 다음과
 같이 생성한다.

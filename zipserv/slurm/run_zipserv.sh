@@ -109,15 +109,19 @@ done
 mapfile -t PLAN < <(
   python3 - "$CONFIG" "${MODELS[*]}" "${LAYERS[*]}" "${BLOCK_SPECS[*]}" <<'PY'
 import json
+import struct
 import sys
 from pathlib import Path
 
 config_path, model_arg, layer_arg, block_arg = sys.argv[1:]
 with open(config_path, encoding="utf-8") as handle:
     config = json.load(handle)
+is_synthetic = "synthetic" in config["input"].get("weight_source", "").lower()
 models = {
     model["id"]: model
-    for model in config["models"] if model.get("enabled", True)
+    for model in config["models"]
+    if model.get("enabled", True)
+    and (is_synthetic or isinstance(model.get("weight"), dict))
 }
 requested_models, requested_layers = model_arg.split(), layer_arg.split()
 if "all" in requested_models and requested_models != ["all"]:
@@ -139,7 +143,7 @@ for spec in block_arg.split():
         raise SystemExit(f"block indices must be unique and non-negative: {spec!r}")
     block_specs[model_id] = blocks
 
-if block_specs and "synthetic" in config["input"].get("weight_source", "").lower():
+if block_specs and is_synthetic:
     raise SystemExit("--blocks is only valid for real-weight experiments")
 
 if requested_models == ["all"] and block_specs:
@@ -156,6 +160,74 @@ missing_block_models = [model for model in selected_models if block_specs and mo
 if missing_block_models:
     raise SystemExit(f"--blocks is missing selected model(s): {', '.join(missing_block_models)}")
 
+def required_weight_files(model_id, model_config, layers, block):
+    weight = model_config.get("weight")
+    if not isinstance(weight, dict):
+        raise SystemExit(f"real-weight configuration is missing for {model_id}")
+    model_dir = Path(weight.get("model_dir", "")).expanduser()
+    index_path = model_dir / "model.safetensors.index.json"
+    single_path = model_dir / "model.safetensors"
+    if index_path.is_file():
+        with index_path.open(encoding="utf-8") as handle:
+            weight_map = json.load(handle).get("weight_map", {})
+    elif single_path.is_file():
+        with single_path.open("rb") as handle:
+            header_size = struct.unpack("<Q", handle.read(8))[0]
+            header = json.loads(handle.read(header_size))
+        weight_map = {
+            tensor_name: single_path.name
+            for tensor_name in header
+            if tensor_name != "__metadata__"
+        }
+    else:
+        raise SystemExit(
+            f"safetensors checkpoint is missing for {model_id}: "
+            f"expected {index_path} or {single_path}"
+        )
+
+    tensor_map = {}
+    layout_id = weight.get("layout")
+    if layout_id:
+        layout = config.get("weight_layouts", {}).get(layout_id)
+        if not isinstance(layout, dict):
+            raise SystemExit(f"unknown weight layout for {model_id}: {layout_id!r}")
+        tensor_map.update(layout)
+    overrides = weight.get("tensors", {})
+    if overrides:
+        if not isinstance(overrides, dict):
+            raise SystemExit(f"weight.tensors must be an object for {model_id}")
+        tensor_map.update(overrides)
+
+    missing_tensors = []
+    missing_shards = set()
+    for layer in layers:
+        templates = tensor_map.get(layer)
+        if not isinstance(templates, list) or not templates:
+            raise SystemExit(
+                f"no tensor mapping for {model_id}/{layer}; layout={layout_id!r}"
+            )
+        try:
+            tensor_names = [
+                template.format(model=model_id, block=block)
+                for template in templates
+            ]
+        except (AttributeError, KeyError, ValueError) as exc:
+            raise SystemExit(f"invalid tensor template for {model_id}/{layer}: {exc}")
+        for tensor_name in tensor_names:
+            shard_name = weight_map.get(tensor_name)
+            if not shard_name:
+                missing_tensors.append(tensor_name)
+            elif not (model_dir / shard_name).is_file():
+                missing_shards.add(str(model_dir / shard_name))
+    if missing_tensors:
+        raise SystemExit(
+            f"tensor(s) missing from {model_id} index: {', '.join(missing_tensors)}"
+        )
+    if missing_shards:
+        raise SystemExit(
+            f"required shard(s) missing for {model_id}: {', '.join(sorted(missing_shards))}"
+        )
+
 for model in selected_models:
     model_config = models[model]
     available_layers = [layer["id"] for layer in model_config["layers"]]
@@ -163,22 +235,42 @@ for model in selected_models:
     unknown = [layer for layer in layers if layer not in available_layers]
     if unknown:
         raise SystemExit(f"unknown layer(s) for {model}: {', '.join(unknown)}")
+    weight = model_config.get("weight", {})
     blocks = block_specs.get(model, ["default"])
-    if block_specs:
-        weight = model_config.get("weight", {})
+    resolved_blocks = [
+        int(weight.get("block_index", 0)) if block == "default" else block
+        for block in blocks
+    ]
+    if not is_synthetic:
         model_config_path = Path(weight.get("model_dir", "")) / "config.json"
         if model_config_path.is_file():
             with model_config_path.open(encoding="utf-8") as handle:
                 num_hidden_layers = json.load(handle).get("num_hidden_layers")
             if num_hidden_layers is not None:
-                invalid = [block for block in blocks if block >= int(num_hidden_layers)]
+                invalid = [
+                    block for block in resolved_blocks
+                    if block >= int(num_hidden_layers)
+                ]
                 if invalid:
                     raise SystemExit(
                         f"block(s) out of range for {model}: {invalid}; "
                         f"available: 0..{int(num_hidden_layers) - 1}"
                     )
-    for block in blocks:
-        print("\t".join([model, str(block), *layers]))
+        for resolved_block in resolved_blocks:
+            required_weight_files(model, model_config, layers, resolved_block)
+    block_scoped = {
+        layer["id"]: layer.get("block_scoped", True)
+        for layer in model_config["layers"]
+    }
+    for position, block in enumerate(blocks):
+        # Global tensors such as lm_head are measured once in the first job of
+        # a block sweep instead of being redundantly repeated for every block.
+        block_layers = [
+            layer for layer in layers
+            if position == 0 or block_scoped[layer]
+        ]
+        if block_layers:
+            print("\t".join([model, str(block), *block_layers]))
 PY
 )
 

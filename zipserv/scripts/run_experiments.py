@@ -40,7 +40,8 @@ class Case:
 RESULT_FIELDS = [
     "phase", "status", "error", "started_at", "finished_at", "wall_seconds",
     "returncode", "model", "layer", "M", "K", "N", "split_k", "trial",
-    "warmup", "repeat", "weight_source", "weight_model_dir", "block_index",
+    "warmup", "repeat", "weight_source", "weight_model_dir", "weight_layout",
+    "weight_tensors", "block_index",
     "seed", "cublas_latency_ms",
     "cublas_tflops", "cublas_tc_latency_ms", "cublas_tc_tflops",
     "zipgemm_latency_ms", "zipgemm_tflops", "compression_ratio",
@@ -70,6 +71,23 @@ def load_config(path: Path) -> dict[str, Any]:
     splits = config["matrix"]["split_k_candidates"]
     if not batches or not splits or any(value <= 0 for value in batches + splits):
         raise ValueError("Batch sizes and Split-K candidates must be positive")
+    weight_layouts = config.get("weight_layouts", {})
+    if not isinstance(weight_layouts, dict):
+        raise ValueError("weight_layouts must be an object")
+    for layout_id, tensor_map in weight_layouts.items():
+        if not isinstance(tensor_map, dict) or not tensor_map:
+            raise ValueError(f"Weight layout must be a non-empty object: {layout_id!r}")
+        for layer_id, templates in tensor_map.items():
+            if (
+                not isinstance(templates, list)
+                or not templates
+                or any(not isinstance(value, str) or not value for value in templates)
+            ):
+                raise ValueError(
+                    f"Weight tensor mapping must be a non-empty string list: "
+                    f"{layout_id}/{layer_id}"
+                )
+
     seen_models: set[str] = set()
     for model in config["models"]:
         if model["id"] in seen_models:
@@ -82,10 +100,42 @@ def load_config(path: Path) -> dict[str, Any]:
             seen_layers.add(layer["id"])
             if layer["M"] <= 0 or layer["K"] <= 0:
                 raise ValueError(f"Invalid shape: {model['id']}/{layer['id']}")
+            if not isinstance(layer.get("block_scoped", True), bool):
+                raise ValueError(
+                    f"block_scoped must be boolean: {model['id']}/{layer['id']}"
+                )
             if layer["M"] % 64 or layer["K"] % 64:
                 raise ValueError(
                     f"ZipGEMM requires M and K divisible by 64: "
                     f"{model['id']}/{layer['id']}={layer['M']}x{layer['K']}"
+                )
+        weight = model.get("weight")
+        if weight is not None:
+            if not isinstance(weight, dict) or not weight.get("model_dir"):
+                raise ValueError(f"Invalid weight configuration: {model['id']}")
+            layout_id = weight.get("layout")
+            model_tensors = weight.get("tensors", {})
+            if not layout_id and not model_tensors:
+                raise ValueError(
+                    f"weight.layout or weight.tensors is required for model {model['id']!r}"
+                )
+            if layout_id and layout_id not in weight_layouts:
+                raise ValueError(
+                    f"Unknown weight layout for {model['id']!r}: {layout_id!r}"
+                )
+            if model_tensors and not isinstance(model_tensors, dict):
+                raise ValueError(f"weight.tensors must be an object: {model['id']!r}")
+            resolved_map: dict[str, Any] = {}
+            if layout_id:
+                resolved_map.update(weight_layouts[layout_id])
+            resolved_map.update(model_tensors)
+            missing_layers = [
+                layer["id"] for layer in model["layers"]
+                if layer["id"] not in resolved_map
+            ]
+            if missing_layers:
+                raise ValueError(
+                    f"Weight tensor mappings are missing for {model['id']}: {missing_layers}"
                 )
     return config
 
@@ -104,6 +154,10 @@ def selected_shapes(
     config: dict[str, Any], models: list[str] | None, layers: list[str] | None
 ) -> list[tuple[str, str, int, int]]:
     enabled = [model for model in config["models"] if model.get("enabled", True)]
+    if "synthetic" not in config["input"]["weight_source"].lower():
+        real_models = [model for model in enabled if isinstance(model.get("weight"), dict)]
+        if models is None:
+            enabled = real_models
     model_ids = select_values((model["id"] for model in enabled), models, "models")
     requested_layers = set(layers) if layers else None
     shapes = []
@@ -133,6 +187,44 @@ def model_weight_config(config: dict[str, Any], model_id: str) -> dict[str, Any]
                 raise ValueError(f"weight.model_dir is missing for model {model_id!r}")
             return weight
     raise ValueError(f"Model configuration not found: {model_id!r}")
+
+
+def weight_tensor_names(
+    config: dict[str, Any], model_id: str, layer_id: str, block_index: int,
+) -> list[str]:
+    """Resolve exact safetensors keys from a reusable config layout.
+
+    Model-level weight.tensors entries override a shared weight_layouts entry.
+    Templates may use {model} and {block}; no model architecture is hard-coded
+    in the C++ loader or experiment runner.
+    """
+    weight = model_weight_config(config, model_id)
+    tensor_map: dict[str, Any] = {}
+    layout_id = weight.get("layout")
+    if layout_id:
+        layout = config.get("weight_layouts", {}).get(layout_id)
+        if not isinstance(layout, dict):
+            raise ValueError(f"Unknown weight layout: {layout_id!r}")
+        tensor_map.update(layout)
+    overrides = weight.get("tensors", {})
+    if overrides:
+        if not isinstance(overrides, dict):
+            raise ValueError(f"weight.tensors must be an object: {model_id!r}")
+        tensor_map.update(overrides)
+
+    templates = tensor_map.get(layer_id)
+    if not isinstance(templates, list) or not templates:
+        raise ValueError(
+            f"No real-weight tensor mapping for {model_id}/{layer_id}; "
+            f"layout={layout_id!r}"
+        )
+
+    try:
+        return [value.format(model=model_id, block=block_index) for value in templates]
+    except (AttributeError, KeyError, ValueError) as exc:
+        raise ValueError(
+            f"Invalid weight tensor template for {model_id}/{layer_id}: {exc}"
+        ) from exc
 
 
 def block_index_for_model(
@@ -447,21 +539,32 @@ def execute_case(
     input_config = config["input"]
     command.extend(["--seed", str(input_config["seed"])])
     weight_model_dir = ""
+    weight_layout = ""
+    resolved_weight_tensors: list[str] = []
     block_index: Any = "" if case.block_index is None else case.block_index
     if "synthetic" not in input_config["weight_source"].lower():
         weight_config = model_weight_config(config, case.model)
         model_dir = Path(weight_config["model_dir"]).expanduser().resolve()
         index_file = model_dir / "model.safetensors.index.json"
-        if not index_file.is_file():
-            raise FileNotFoundError(f"Safetensors index not found: {index_file}")
+        single_file = model_dir / "model.safetensors"
+        if not index_file.is_file() and not single_file.is_file():
+            raise FileNotFoundError(
+                f"Safetensors checkpoint not found: expected {index_file} or {single_file}"
+            )
         if case.block_index is None:
             raise ValueError(f"Real-weight case has no block index: {case.model}")
         block_index = case.block_index
         weight_model_dir = str(model_dir)
+        weight_layout = str(weight_config.get("layout", "custom"))
+        resolved_weight_tensors = weight_tensor_names(
+            config, case.model, case.layer, case.block_index
+        )
         command.extend([
             "--model-dir", weight_model_dir,
             "--block-index", str(block_index),
         ])
+        for tensor_name in resolved_weight_tensors:
+            command.extend(["--weight-tensor", tensor_name])
     started_at, start = utc_now(), time.monotonic()
     status, error, returncode, log_text = "failed", "", None, ""
     metrics: dict[str, Any] = {}
@@ -500,7 +603,9 @@ def execute_case(
         "layer": case.layer, "M": case.m, "K": case.k, "N": case.n,
         "split_k": case.split_k, "trial": case.trial, "warmup": settings["warmup"],
         "repeat": settings["repeat"], "weight_source": input_config["weight_source"],
-        "weight_model_dir": weight_model_dir, "block_index": block_index,
+        "weight_model_dir": weight_model_dir, "weight_layout": weight_layout,
+        "weight_tensors": json.dumps(resolved_weight_tensors, separators=(",", ":")),
+        "block_index": block_index,
         "seed": input_config["seed"], "compression_ratio": metrics.get("compression_ratio", ""),
         "log_file": str(log_file),
     })

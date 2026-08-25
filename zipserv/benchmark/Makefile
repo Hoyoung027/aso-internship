@@ -54,14 +54,14 @@ ALL_CCFLAGS += --ptxas-options=-v,-warn-lmem-usage,--warn-on-spills
 # Target rules
 all: test_mm
 
-test_mm.o: test_mm.cu utils.h llama_weight_loader.h
+test_mm.o: test_mm.cu utils.h safetensors_weight_loader.h
 	$(EXEC) $(NVCC) $(INCLUDES) $(ALL_CCFLAGS) $(GENCODE_FLAGS) -o $@ -c $<
 
-llama_weight_loader.o: llama_weight_loader.cpp llama_weight_loader.h
+safetensors_weight_loader.o: safetensors_weight_loader.cpp safetensors_weight_loader.h
 	$(EXEC) $(HOST_COMPILER) -O2 -std=c++14 $(INCLUDES) -o $@ -c $<
 
-test_mm: test_mm.o llama_weight_loader.o
+test_mm: test_mm.o safetensors_weight_loader.o
 	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) -o $@ $+ $(LIBRARIES)
 
 clean:
-	rm -f test_mm test_mm.o llama_weight_loader.o
+	rm -f test_mm test_mm.o safetensors_weight_loader.o llama_weight_loader.o

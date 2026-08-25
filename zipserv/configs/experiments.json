@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "ZipServ real Llama 3.1 8B/70B block-0 ZipGEMM vs cuBLAS experiments",
+  "description": "ZipServ real Hugging Face safetensors experiments with config-driven model, block, and projection mappings",
   "paths": {
     "zipserv_source": "/home/hybyun0207/ZipServ_ASPLOS26",
     "cuda_path": "/opt/ohpc/pub/apps/cuda/12.8"
@@ -13,9 +13,31 @@
     ]
   },
   "input": {
-    "weight_source": "llama3.1_real_block0",
+    "weight_source": "real_safetensors",
     "seed": 12345,
     "dtype": "bf16"
+  },
+  "weight_layouts": {
+    "hf_llama_qwen_decoder": {
+      "qkv_proj": [
+        "model.layers.{block}.self_attn.q_proj.weight",
+        "model.layers.{block}.self_attn.k_proj.weight",
+        "model.layers.{block}.self_attn.v_proj.weight"
+      ],
+      "o_proj": [
+        "model.layers.{block}.self_attn.o_proj.weight"
+      ],
+      "gateup_proj": [
+        "model.layers.{block}.mlp.gate_proj.weight",
+        "model.layers.{block}.mlp.up_proj.weight"
+      ],
+      "down_proj": [
+        "model.layers.{block}.mlp.down_proj.weight"
+      ],
+      "lm_head": [
+        "lm_head.weight"
+      ]
+    }
   },
   "matrix": {
     "batches": [8, 16, 32],
@@ -40,6 +62,7 @@
       "source_config": "meta-llama/Llama-3.1-8B-Instruct",
       "weight": {
         "model_dir": "/lustre/hybyun0207/models/Llama-3.1-8B-Instruct",
+        "layout": "hf_llama_qwen_decoder",
         "block_index": 0
       },
       "enabled": true,
@@ -48,7 +71,7 @@
         {"id": "o_proj", "M": 4096, "K": 4096},
         {"id": "gateup_proj", "M": 28672, "K": 4096},
         {"id": "down_proj", "M": 4096, "K": 14336},
-        {"id": "lm_head", "M": 128256, "K": 4096}
+        {"id": "lm_head", "M": 128256, "K": 4096, "block_scoped": false}
       ]
     },
     {
@@ -56,6 +79,7 @@
       "source_config": "meta-llama/Llama-3.1-70B-Instruct",
       "weight": {
         "model_dir": "/lustre/hybyun0207/models/Llama-3.1-70B-Instruct",
+        "layout": "hf_llama_qwen_decoder",
         "block_index": 0
       },
       "enabled": true,
@@ -64,7 +88,7 @@
         {"id": "o_proj", "M": 8192, "K": 8192},
         {"id": "gateup_proj", "M": 57344, "K": 8192},
         {"id": "down_proj", "M": 8192, "K": 28672},
-        {"id": "lm_head", "M": 128256, "K": 8192}
+        {"id": "lm_head", "M": 128256, "K": 8192, "block_scoped": false}
       ]
     },
     {
@@ -76,31 +100,41 @@
         {"id": "o_proj", "M": 16384, "K": 16384},
         {"id": "gateup_proj", "M": 106496, "K": 16384},
         {"id": "down_proj", "M": 16384, "K": 53248},
-        {"id": "lm_head", "M": 128256, "K": 16384}
+        {"id": "lm_head", "M": 128256, "K": 16384, "block_scoped": false}
       ]
     },
     {
       "id": "qwen2.5-7b",
       "source_config": "Qwen/Qwen2.5-7B-Instruct",
+      "weight": {
+        "model_dir": "/lustre/hybyun0207/models/Qwen2.5-7B-Instruct",
+        "layout": "hf_llama_qwen_decoder",
+        "block_index": 0
+      },
       "enabled": true,
       "layers": [
         {"id": "qkv_proj", "M": 4608, "K": 3584},
         {"id": "o_proj", "M": 3584, "K": 3584},
         {"id": "gateup_proj", "M": 37888, "K": 3584},
         {"id": "down_proj", "M": 3584, "K": 18944},
-        {"id": "lm_head", "M": 152064, "K": 3584}
+        {"id": "lm_head", "M": 152064, "K": 3584, "block_scoped": false}
       ]
     },
     {
       "id": "qwen2.5-14b",
       "source_config": "Qwen/Qwen2.5-14B-Instruct",
+      "weight": {
+        "model_dir": "/lustre/hybyun0207/models/Qwen2.5-14B-Instruct",
+        "layout": "hf_llama_qwen_decoder",
+        "block_index": 0
+      },
       "enabled": true,
       "layers": [
         {"id": "qkv_proj", "M": 7168, "K": 5120},
         {"id": "o_proj", "M": 5120, "K": 5120},
         {"id": "gateup_proj", "M": 27648, "K": 5120},
         {"id": "down_proj", "M": 5120, "K": 13824},
-        {"id": "lm_head", "M": 152064, "K": 5120}
+        {"id": "lm_head", "M": 152064, "K": 5120, "block_scoped": false}
       ]
     },
     {
@@ -112,7 +146,7 @@
         {"id": "o_proj", "M": 5120, "K": 5120},
         {"id": "gateup_proj", "M": 55296, "K": 5120},
         {"id": "down_proj", "M": 5120, "K": 27648},
-        {"id": "lm_head", "M": 152064, "K": 5120}
+        {"id": "lm_head", "M": 152064, "K": 5120, "block_scoped": false}
       ]
     },
     {
@@ -124,7 +158,7 @@
         {"id": "o_proj", "M": 8192, "K": 8192},
         {"id": "gateup_proj", "M": 59136, "K": 8192},
         {"id": "down_proj", "M": 8192, "K": 29568},
-        {"id": "lm_head", "M": 152064, "K": 8192}
+        {"id": "lm_head", "M": 152064, "K": 8192, "block_scoped": false}
       ]
     },
     {
@@ -136,7 +170,7 @@
         {"id": "o_proj", "M": 3840, "K": 4096},
         {"id": "gateup_proj", "M": 30720, "K": 3840},
         {"id": "down_proj", "M": 3840, "K": 15360},
-        {"id": "lm_head", "M": 262208, "K": 3840}
+        {"id": "lm_head", "M": 262208, "K": 3840, "block_scoped": false}
       ]
     },
     {
@@ -148,7 +182,7 @@
         {"id": "o_proj", "M": 5376, "K": 4096},
         {"id": "gateup_proj", "M": 43008, "K": 5376},
         {"id": "down_proj", "M": 5376, "K": 21504},
-        {"id": "lm_head", "M": 262208, "K": 5376}
+        {"id": "lm_head", "M": 262208, "K": 5376, "block_scoped": false}
       ]
     },
     {
@@ -160,7 +194,7 @@
         {"id": "o_proj", "M": 5120, "K": 5120},
         {"id": "gateup_proj", "M": 65536, "K": 5120},
         {"id": "down_proj", "M": 5120, "K": 32768},
-        {"id": "lm_head", "M": 131072, "K": 5120}
+        {"id": "lm_head", "M": 131072, "K": 5120, "block_scoped": false}
       ]
     },
     {
@@ -172,7 +206,7 @@
         {"id": "o_proj", "M": 12288, "K": 12288},
         {"id": "gateup_proj", "M": 57344, "K": 12288},
         {"id": "down_proj", "M": 12288, "K": 28672},
-        {"id": "lm_head", "M": 32768, "K": 12288}
+        {"id": "lm_head", "M": 32768, "K": 12288, "block_scoped": false}
       ]
     }
   ]

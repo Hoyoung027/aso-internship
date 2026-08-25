@@ -39,8 +39,8 @@ for required in \
   "$ZIP_ROOT/build/Makefile" \
   "$BENCH_DIR/Makefile" \
   "$BENCH_DIR/test_mm.cu" \
-  "$BENCH_DIR/llama_weight_loader.h" \
-  "$BENCH_DIR/llama_weight_loader.cpp" \
+  "$BENCH_DIR/safetensors_weight_loader.h" \
+  "$BENCH_DIR/safetensors_weight_loader.cpp" \
   "$UTILS_HEADER" \
   "$EXP_ROOT/deps/safetensors-cpp/safetensors.hh" \
   "$EXP_ROOT/deps/nlohmann-json/single_include/nlohmann/json.hpp"; do

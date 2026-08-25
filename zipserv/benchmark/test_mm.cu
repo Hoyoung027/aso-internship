@@ -9,9 +9,11 @@
 #include <iomanip>
 #include <iostream>
 #include <fstream>
+#include <string>
+#include <vector>
 #include "L_API.cuh"
 #include "./utils.h"
-#include "llama_weight_loader.h"
+#include "safetensors_weight_loader.h"
 // Host-side popcount function to replace __popcll
 inline int host_popcll(uint64_t val) {
     int count = 0;
@@ -290,6 +292,7 @@ int main(int argc, char** argv)
     std::string layer_name = "unknown";
 
     std::string model_dir;
+    std::vector<std::string> weight_tensor_names;
     int block_index = 0;
     unsigned seed = 12345;
     
@@ -302,6 +305,8 @@ int main(int argc, char** argv)
             layer_name = argv[++i];
         } else if (arg == "--model-dir" && i + 1 < argc) {
             model_dir = argv[++i];
+        } else if (arg == "--weight-tensor" && i + 1 < argc) {
+            weight_tensor_names.push_back(argv[++i]);
         } else if (arg == "--block-index" && i + 1 < argc) {
             block_index = std::stoi(argv[++i]);
         } else if (arg == "--seed" && i + 1 < argc) {
@@ -315,7 +320,8 @@ int main(int argc, char** argv)
         printf(
             "Usage: ./test_mm M K N SplitK "
             "[--model MODEL] [--layer LAYER] "
-            "[--model-dir DIR] [--block-index INDEX] "
+            "[--model-dir DIR] [--weight-tensor NAME]... "
+            "[--block-index INDEX] "
             "[--seed SEED]\n"
         );
         return -1;
@@ -385,7 +391,7 @@ int main(int argc, char** argv)
             seed
         );
     } else {
-        printf("Weight source: real Llama checkpoint\n");
+        printf("Weight source: real safetensors checkpoint\n");
         printf("Model directory: %s\n", model_dir.c_str());
         printf("Block index: %d\n", block_index);
         printf("Activation seed: %u\n", seed);
@@ -395,16 +401,17 @@ int main(int argc, char** argv)
             "Unexpected __nv_bfloat16 size"
         );
 
-        LlamaWeightRequest request;
+        SafetensorsWeightRequest request;
         request.model_dir = model_dir;
-        request.layer_name = layer_name;
-        request.block_index = block_index;
+        request.label = model_name + "/" + layer_name +
+            "/block" + std::to_string(block_index);
+        request.tensor_names = weight_tensor_names;
         request.expected_m = M_GLOBAL;
         request.expected_k = K_GLOBAL;
 
         std::string load_error;
 
-        if (!LoadLlamaWeight(
+        if (!LoadSafetensorsWeight(
                 request,
                 reinterpret_cast<uint16_t*>(A_h),
                 &load_error)) {

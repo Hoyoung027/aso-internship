@@ -274,8 +274,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument("--models", nargs="+", help="Default: every enabled model present in the tuning result")
     parser.add_argument("--output-dir", type=Path, default=Path(__file__).resolve().parent / "latency_by_splitk")
-    parser.add_argument("--png-scale", type=float, default=1.0)
-    parser.add_argument("--keep-svg", action="store_true")
+    parser.add_argument(
+        "--png-scale", type=float, default=2.0,
+        help="PNG raster scale relative to the SVG canvas (default: 2.0, 3600 px wide)",
+    )
+    parser.add_argument(
+        "--keep-svg", action="store_true",
+        help="Keep the intermediate vector SVG (default: PNG only)",
+    )
     parser.add_argument("--allow-incomplete", action="store_true")
     return parser.parse_args()
 
