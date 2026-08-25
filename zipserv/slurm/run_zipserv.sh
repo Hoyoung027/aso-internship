@@ -11,12 +11,14 @@ usage() {
   cat <<'EOF'
 Usage: slurm/run_zipserv.sh [OPTIONS]
 
-Submit one Slurm job per model and one dependent collector job.
+Submit one Slurm job per model/block and one dependent collector job.
 
 Options:
-  --mode tune|run            One-time Split-K tuning or performance run
+  --mode tune|run|both       Split-K tuning, performance run, or both in sequence
                              (default: run)
   --models MODEL [...]       Models to run (default: all enabled models)
+  --blocks MODEL=IDX,...     Override real-weight blocks; one job per model/block
+                             (with --models all, selects the listed models)
   --layers LAYER [...]       Layers to run (default: all)
   --output-root DIR          Parent directory for all experiment directories
   --tuning-dir DIR           Persistent tuning directory
@@ -27,13 +29,16 @@ Options:
 
 Examples:
   slurm/run_zipserv.sh --mode tune
+  slurm/run_zipserv.sh --mode both --models llama3.1-8b llama3.1-70b
   slurm/run_zipserv.sh --models llama3.1-8b --layers qkv_proj o_proj
+  slurm/run_zipserv.sh --mode run --blocks llama3.1-8b=16,31 llama3.1-70b=40,79
   slurm/run_zipserv.sh --run-dir results/run-20260822-153000 --models llama3.1-8b
 EOF
 }
 
 MODE=run
 MODELS=(all)
+BLOCK_SPECS=()
 LAYERS=(all)
 RUN_DIR=
 WALL_TIME=05:00:00
@@ -42,11 +47,11 @@ DRY_RUN=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --mode)
-      [[ $# -ge 2 ]] || { echo "--mode requires tune or run." >&2; exit 2; }
+      [[ $# -ge 2 ]] || { echo "--mode requires tune, run, or both." >&2; exit 2; }
       MODE=$2
       shift 2
-      [[ "$MODE" == tune || "$MODE" == run ]] || {
-        echo "Invalid --mode: $MODE (expected tune or run)." >&2
+      [[ "$MODE" == tune || "$MODE" == run || "$MODE" == both ]] || {
+        echo "Invalid --mode: $MODE (expected tune, run, or both)." >&2
         exit 2
       }
       ;;
@@ -55,6 +60,15 @@ while [[ $# -gt 0 ]]; do
       MODELS=()
       while [[ $# -gt 0 && "$1" != --* ]]; do MODELS+=("$1"); shift; done
       [[ ${#MODELS[@]} -gt 0 ]] || { echo "--models requires a value." >&2; exit 2; }
+      ;;
+    --blocks|--block)
+      shift
+      BLOCK_SPECS=()
+      while [[ $# -gt 0 && "$1" != --* ]]; do BLOCK_SPECS+=("$1"); shift; done
+      [[ ${#BLOCK_SPECS[@]} -gt 0 ]] || {
+        echo "--blocks requires MODEL=IDX[,IDX...] values." >&2
+        exit 2
+      }
       ;;
     --layers|--layer)
       shift
@@ -93,15 +107,16 @@ while [[ $# -gt 0 ]]; do
 done
 
 mapfile -t PLAN < <(
-  python3 - "$CONFIG" "${MODELS[*]}" "${LAYERS[*]}" <<'PY'
+  python3 - "$CONFIG" "${MODELS[*]}" "${LAYERS[*]}" "${BLOCK_SPECS[*]}" <<'PY'
 import json
 import sys
+from pathlib import Path
 
-config_path, model_arg, layer_arg = sys.argv[1:]
+config_path, model_arg, layer_arg, block_arg = sys.argv[1:]
 with open(config_path, encoding="utf-8") as handle:
     config = json.load(handle)
 models = {
-    model["id"]: [layer["id"] for layer in model["layers"]]
+    model["id"]: model
     for model in config["models"] if model.get("enabled", True)
 }
 requested_models, requested_layers = model_arg.split(), layer_arg.split()
@@ -109,16 +124,61 @@ if "all" in requested_models and requested_models != ["all"]:
     raise SystemExit("'all' cannot be combined with specific models")
 if "all" in requested_layers and requested_layers != ["all"]:
     raise SystemExit("'all' cannot be combined with specific layers")
-selected_models = list(models) if requested_models == ["all"] else requested_models
+block_specs = {}
+for spec in block_arg.split():
+    if "=" not in spec:
+        raise SystemExit(f"invalid --blocks value {spec!r}; expected MODEL=IDX[,IDX...]")
+    model_id, values = spec.split("=", 1)
+    if not model_id or not values or model_id in block_specs:
+        raise SystemExit(f"invalid or duplicate --blocks value: {spec!r}")
+    try:
+        blocks = [int(value) for value in values.split(",")]
+    except ValueError:
+        raise SystemExit(f"invalid block index in {spec!r}") from None
+    if any(block < 0 for block in blocks) or len(set(blocks)) != len(blocks):
+        raise SystemExit(f"block indices must be unique and non-negative: {spec!r}")
+    block_specs[model_id] = blocks
+
+if block_specs and "synthetic" in config["input"].get("weight_source", "").lower():
+    raise SystemExit("--blocks is only valid for real-weight experiments")
+
+if requested_models == ["all"] and block_specs:
+    selected_models = list(block_specs)
+else:
+    selected_models = list(models) if requested_models == ["all"] else requested_models
 unknown = [model for model in selected_models if model not in models]
 if unknown:
     raise SystemExit(f"unknown model(s): {', '.join(unknown)}; available: {', '.join(models)}")
+unknown_block_models = [model for model in block_specs if model not in selected_models]
+if unknown_block_models:
+    raise SystemExit(f"--blocks contains unselected model(s): {', '.join(unknown_block_models)}")
+missing_block_models = [model for model in selected_models if block_specs and model not in block_specs]
+if missing_block_models:
+    raise SystemExit(f"--blocks is missing selected model(s): {', '.join(missing_block_models)}")
+
 for model in selected_models:
-    layers = models[model] if requested_layers == ["all"] else requested_layers
-    unknown = [layer for layer in layers if layer not in models[model]]
+    model_config = models[model]
+    available_layers = [layer["id"] for layer in model_config["layers"]]
+    layers = available_layers if requested_layers == ["all"] else requested_layers
+    unknown = [layer for layer in layers if layer not in available_layers]
     if unknown:
         raise SystemExit(f"unknown layer(s) for {model}: {', '.join(unknown)}")
-    print("\t".join([model, *layers]))
+    blocks = block_specs.get(model, ["default"])
+    if block_specs:
+        weight = model_config.get("weight", {})
+        model_config_path = Path(weight.get("model_dir", "")) / "config.json"
+        if model_config_path.is_file():
+            with model_config_path.open(encoding="utf-8") as handle:
+                num_hidden_layers = json.load(handle).get("num_hidden_layers")
+            if num_hidden_layers is not None:
+                invalid = [block for block in blocks if block >= int(num_hidden_layers)]
+                if invalid:
+                    raise SystemExit(
+                        f"block(s) out of range for {model}: {invalid}; "
+                        f"available: 0..{int(num_hidden_layers) - 1}"
+                    )
+    for block in blocks:
+        print("\t".join([model, str(block), *layers]))
 PY
 )
 
@@ -143,11 +203,157 @@ print(gpu, weight or "unknown")
 PY
 )
 
+BLOCK_TAG=
+if [[ ${#BLOCK_SPECS[@]} -gt 0 ]]; then
+  BLOCK_TAG=$(python3 - "${BLOCK_SPECS[@]}" <<'PY'
+import re
+import sys
+
+parts = []
+for spec in sys.argv[1:]:
+    model, blocks = spec.split("=", 1)
+    model = re.sub(r"[^a-z0-9]+", "_", model.lower()).strip("_")
+    parts.append(f"{model}-b{blocks.replace(',', '-')}")
+print("-blocks-" + "-".join(parts))
+PY
+  )
+fi
+RUN_WEIGHT_TAG=${WEIGHT_TAG}${BLOCK_TAG}
+
 mkdir -p "$RESULT_ROOT"
+
+submit_both_model_jobs() {
+  local phase=$1
+  local phase_dir=$2
+  local selection_file=$3
+  local dependency_id=$4
+
+  BOTH_MODEL_JOB_IDS=()
+  for item in "${PLAN[@]}"; do
+    IFS=$'\t' read -r -a fields <<< "$item"
+    local model=${fields[0]}
+    local block_index=${fields[1]}
+    local layers=("${fields[@]:2}")
+    local block_suffix=
+    local block_path=
+    if [[ "$block_index" != default ]]; then
+      block_suffix=-block-$block_index
+      block_path=/block-$block_index
+    fi
+    local model_dir=$phase_dir/raw/$model$block_path
+    local model_log=$phase_dir/logs/$model$block_suffix.log
+    local safe_model=${model//./_}
+    mkdir -p "$model_dir"
+
+    local command=(sbatch --parsable)
+    if [[ -n "$dependency_id" ]]; then
+      command+=(--dependency="afterok:$dependency_id")
+    fi
+    command+=(
+      --job-name="zip-${safe_model}${block_suffix}-${phase}"
+      --time="$WALL_TIME"
+      --output="$phase_dir/logs/${model}${block_suffix}-slurm-%j.out"
+      "$SCRIPT_DIR/run_zipserv.sbatch"
+      "$phase"
+      --config "$phase_dir/experiments.json"
+      --models "$model"
+      --layers "${layers[@]}"
+      --output-dir "$model_dir"
+      --log-file "$model_log"
+    )
+    if [[ "$block_index" != default ]]; then
+      command+=(--block-index "$block_index")
+    fi
+    if [[ "$phase" == run ]]; then
+      command+=(--selection-file "$selection_file")
+    fi
+
+    printf '  %s %s%s: layers=%s\n' "$phase" "$model" "$block_suffix" "${layers[*]}"
+    if [[ "$DRY_RUN" == 1 ]]; then
+      printf '    '; printf '%q ' "${command[@]}"; printf '\n'
+    else
+      local submission
+      submission=$("${command[@]}")
+      local job_id=${submission%%;*}
+      BOTH_MODEL_JOB_IDS+=("$job_id")
+      printf '    job=%s\n' "$job_id"
+    fi
+  done
+
+  if [[ "$DRY_RUN" == 1 ]]; then
+    BOTH_MODEL_DEP="<${phase}-model-job-ids>"
+  else
+    BOTH_MODEL_DEP=$(IFS=:; echo "${BOTH_MODEL_JOB_IDS[*]}")
+  fi
+}
+
+submit_both_collector() {
+  local phase=$1
+  local phase_dir=$2
+  local dependency_type=$3
+  local dependency_id=$4
+  local command=(
+    sbatch --parsable
+    --job-name="zip-collect-${phase}"
+    --output="$phase_dir/logs/collector-slurm-%j.out"
+    --dependency="${dependency_type}:${dependency_id}"
+    "$SCRIPT_DIR/collect_results.sbatch"
+    "$phase"
+    "$phase_dir"
+    "$phase_dir/experiments.json"
+  )
+
+  if [[ "$DRY_RUN" == 1 ]]; then
+    printf '  %s collector: ' "$phase"; printf '%q ' "${command[@]}"; printf '\n'
+    BOTH_COLLECTOR_JOB_ID="<${phase}-collector-job-id>"
+  else
+    local submission
+    submission=$("${command[@]}")
+    BOTH_COLLECTOR_JOB_ID=${submission%%;*}
+    printf '  %s collector job=%s\n' "$phase" "$BOTH_COLLECTOR_JOB_ID"
+  fi
+}
+
+if [[ "$MODE" == both ]]; then
+  if [[ -z "$TUNING_DIR" ]]; then
+    TUNING_DIR=$RESULT_ROOT/zipserv-${GPU_TAG}-${RUN_WEIGHT_TAG}-$(date +%Y%m%d)-tuning
+  fi
+  if [[ -z "$RUN_DIR" ]]; then
+    RUN_DIR=$RESULT_ROOT/zipserv-${GPU_TAG}-${RUN_WEIGHT_TAG}-$(date +%Y%m%d-%H%M%S)-run
+  fi
+  [[ "$TUNING_DIR" != "$RUN_DIR" ]] || {
+    echo "--tuning-dir and --run-dir must be different in --mode both." >&2
+    exit 2
+  }
+
+  mkdir -p "$TUNING_DIR/raw" "$TUNING_DIR/logs" "$RUN_DIR/raw" "$RUN_DIR/logs"
+  cp -p "$CONFIG" "$TUNING_DIR/experiments.json"
+  cp -p "$CONFIG" "$RUN_DIR/experiments.json"
+
+  echo "Mode: both"
+  echo "Tuning directory: $TUNING_DIR"
+  echo "Run directory: $RUN_DIR"
+  echo "Model/block jobs: ${#PLAN[@]}"
+
+  submit_both_model_jobs tune "$TUNING_DIR" "" ""
+  submit_both_collector tune "$TUNING_DIR" afterok "$BOTH_MODEL_DEP"
+  tune_collector_id=$BOTH_COLLECTOR_JOB_ID
+
+  submit_both_model_jobs \
+    run "$RUN_DIR" "$TUNING_DIR/selected_splitk.csv" "$tune_collector_id"
+  submit_both_collector run "$RUN_DIR" afterany "$BOTH_MODEL_DEP"
+
+  echo "Tuning result will be written to: $TUNING_DIR/result_all.csv"
+  echo "Split-K selection will be written to: $TUNING_DIR/selected_splitk.csv"
+  echo "Final result will be written to: $RUN_DIR/result_all.csv"
+  echo "Final summary will be written to: $RUN_DIR/summary.csv"
+  exit 0
+fi
+
 if [[ "$MODE" == tune ]]; then
   [[ -z "$RUN_DIR" ]] || { echo "--run-dir cannot be used with --mode tune; use --tuning-dir." >&2; exit 2; }
   if [[ -z "$TUNING_DIR" ]]; then
-    TUNING_DIR=$RESULT_ROOT/zipserv-${GPU_TAG}-${WEIGHT_TAG}-$(date +%Y%m%d)-tuning
+    TUNING_DIR=$RESULT_ROOT/zipserv-${GPU_TAG}-${RUN_WEIGHT_TAG}-$(date +%Y%m%d)-tuning
   fi
   RUN_DIR=$TUNING_DIR
 else
@@ -173,7 +379,7 @@ else
     exit 2
   fi
   if [[ -z "$RUN_DIR" ]]; then
-    RUN_DIR=$RESULT_ROOT/zipserv-${GPU_TAG}-${WEIGHT_TAG}-$(date +%Y%m%d-%H%M%S)-run
+    RUN_DIR=$RESULT_ROOT/zipserv-${GPU_TAG}-${RUN_WEIGHT_TAG}-$(date +%Y%m%d-%H%M%S)-run
   fi
 fi
 
@@ -182,34 +388,45 @@ cp -p "$CONFIG" "$RUN_DIR/experiments.json"
 
 echo "Mode: $MODE"
 echo "Run directory: $RUN_DIR"
-echo "Models: ${#PLAN[@]}"
+echo "Model/block jobs: ${#PLAN[@]}"
 
 job_ids=()
 for item in "${PLAN[@]}"; do
   IFS=$'\t' read -r -a fields <<< "$item"
   model=${fields[0]}
-  layers=("${fields[@]:1}")
-  model_dir=$RUN_DIR/raw/$model
-  model_log=$RUN_DIR/logs/$model.log
+  block_index=${fields[1]}
+  layers=("${fields[@]:2}")
+  block_suffix=
+  block_path=
+  if [[ "$block_index" != default ]]; then
+    block_suffix=-block-$block_index
+    block_path=/block-$block_index
+  fi
+  model_dir=$RUN_DIR/raw/$model$block_path
+  model_log=$RUN_DIR/logs/$model$block_suffix.log
   mkdir -p "$model_dir"
   safe_model=${model//./_}
   command=(
     sbatch --parsable
-    --job-name="zip-${safe_model}-${MODE}"
+    --job-name="zip-${safe_model}${block_suffix}-${MODE}"
     --time="$WALL_TIME"
-    --output="$RUN_DIR/logs/${model}-slurm-%j.out"
+    --output="$RUN_DIR/logs/${model}${block_suffix}-slurm-%j.out"
     "$SCRIPT_DIR/run_zipserv.sbatch"
     "$MODE"
+    --config "$RUN_DIR/experiments.json"
     --models "$model"
     --layers "${layers[@]}"
     --output-dir "$model_dir"
     --log-file "$model_log"
   )
+  if [[ "$block_index" != default ]]; then
+    command+=(--block-index "$block_index")
+  fi
   if [[ "$MODE" == run ]]; then
     command+=(--selection-file "$TUNING_DIR/selected_splitk.csv")
   fi
 
-  printf '  %s: layers=%s\n' "$model" "${layers[*]}"
+  printf '  %s%s: layers=%s\n' "$model" "$block_suffix" "${layers[*]}"
   if [[ "$DRY_RUN" == 1 ]]; then
     printf '    '; printf '%q ' "${command[@]}"; printf '\n'
   else
@@ -231,7 +448,9 @@ else
   dependency=$(IFS=:; echo "${job_ids[*]}")
   collector+=(--dependency="afterany:$dependency")
 fi
-collector+=("$SCRIPT_DIR/collect_results.sbatch" "$MODE" "$RUN_DIR")
+collector+=(
+  "$SCRIPT_DIR/collect_results.sbatch" "$MODE" "$RUN_DIR" "$RUN_DIR/experiments.json"
+)
 
 if [[ "$DRY_RUN" == 1 ]]; then
   printf '  collector: '; printf '%q ' "${collector[@]}"; printf '\n'

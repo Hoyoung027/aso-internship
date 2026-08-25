@@ -34,12 +34,14 @@ class Case:
     n: int
     split_k: int
     trial: int
+    block_index: int | None
 
 
 RESULT_FIELDS = [
     "phase", "status", "error", "started_at", "finished_at", "wall_seconds",
     "returncode", "model", "layer", "M", "K", "N", "split_k", "trial",
-    "warmup", "repeat", "weight_source", "seed", "cublas_latency_ms",
+    "warmup", "repeat", "weight_source", "weight_model_dir", "block_index",
+    "seed", "cublas_latency_ms",
     "cublas_tflops", "cublas_tc_latency_ms", "cublas_tc_tflops",
     "zipgemm_latency_ms", "zipgemm_tflops", "compression_ratio",
     "tc_speedup_vs_non_tc", "zipgemm_speedup_vs_non_tc", "zipgemm_speedup_vs_tc",
@@ -119,6 +121,45 @@ def selected_shapes(
     return shapes
 
 
+def model_weight_config(config: dict[str, Any], model_id: str) -> dict[str, Any]:
+    for model in config["models"]:
+        if model["id"] == model_id:
+            weight = model.get("weight")
+            if not isinstance(weight, dict):
+                raise ValueError(
+                    f"Real-weight configuration is missing for model {model_id!r}"
+                )
+            if not weight.get("model_dir"):
+                raise ValueError(f"weight.model_dir is missing for model {model_id!r}")
+            return weight
+    raise ValueError(f"Model configuration not found: {model_id!r}")
+
+
+def block_index_for_model(
+    config: dict[str, Any], model_id: str, override: int | None,
+) -> int | None:
+    if "synthetic" in config["input"]["weight_source"].lower():
+        if override is not None:
+            raise ValueError("--block-index is only valid for real-weight experiments")
+        return None
+
+    weight = model_weight_config(config, model_id)
+    block_index = int(weight.get("block_index", 0) if override is None else override)
+    if block_index < 0:
+        raise ValueError(f"Block index must be non-negative: {model_id}={block_index}")
+
+    model_config_path = Path(weight["model_dir"]).expanduser().resolve() / "config.json"
+    if model_config_path.is_file():
+        with model_config_path.open(encoding="utf-8") as handle:
+            num_hidden_layers = json.load(handle).get("num_hidden_layers")
+        if num_hidden_layers is not None and block_index >= int(num_hidden_layers):
+            raise ValueError(
+                f"Block index out of range for {model_id}: {block_index}; "
+                f"available=0..{int(num_hidden_layers) - 1}"
+            )
+    return block_index
+
+
 def make_tune_cases(
     config: dict[str, Any], shapes: list[tuple[str, str, int, int]], args: argparse.Namespace
 ) -> list[Case]:
@@ -126,7 +167,10 @@ def make_tune_cases(
     splits = select_values(config["matrix"]["split_k_candidates"], args.splits, "splits")
     trials = config["phases"]["tune"]["trials"]
     cases = [
-        Case(model, layer, m, k, n, split_k, trial)
+        Case(
+            model, layer, m, k, n, split_k, trial,
+            block_index_for_model(config, model, args.block_index),
+        )
         for model, layer, m, k in shapes
         for n in batches
         for split_k in splits
@@ -151,19 +195,36 @@ def make_run_cases(
 ) -> list[Case]:
     batches = set(select_values(config["matrix"]["batches"], args.batches, "batches"))
     trials = config["phases"]["final"]["trials"]
-    selected: dict[tuple[str, str, int, int, int], int] = {}
+    selected: dict[tuple[str, str, int, int, int, int], int] = {}
+    unscoped: dict[tuple[str, str, int, int, int], int] = {}
+    candidates_by_shape: dict[tuple[str, str, int, int, int], set[int]] = {}
     for row in read_selected_splitk(selection_file):
-        key = (row["model"], row["layer"], int(row["M"]), int(row["K"]), int(row["N"]))
-        selected[key] = int(row["split_k"])
+        shape_key = (
+            row["model"], row["layer"], int(row["M"]), int(row["K"]), int(row["N"]),
+        )
+        split_k = int(row["split_k"])
+        candidates_by_shape.setdefault(shape_key, set()).add(split_k)
+        block_value = row.get("block_index", "").strip()
+        if block_value:
+            selected[(*shape_key, int(block_value))] = split_k
+        else:
+            unscoped[shape_key] = split_k
     cases, missing = [], []
     for model, layer, m, k in shapes:
+        block_index = block_index_for_model(config, model, args.block_index)
         for n in sorted(batches):
-            key = (model, layer, m, k, n)
-            if key not in selected:
-                missing.append(f"{model}/{layer} M={m} K={k} N={n}")
+            shape_key = (model, layer, m, k, n)
+            split_k = selected.get((*shape_key, block_index)) if block_index is not None else None
+            if split_k is None:
+                split_k = unscoped.get(shape_key)
+            if split_k is None and len(candidates_by_shape.get(shape_key, set())) == 1:
+                split_k = next(iter(candidates_by_shape[shape_key]))
+            if split_k is None:
+                block_label = "" if block_index is None else f" block={block_index}"
+                missing.append(f"{model}/{layer}{block_label} M={m} K={k} N={n}")
                 continue
             cases.extend(
-                Case(model, layer, m, k, n, selected[key], trial)
+                Case(model, layer, m, k, n, split_k, trial, block_index)
                 for trial in range(1, trials + 1)
             )
     if missing:
@@ -323,7 +384,9 @@ def parse_metrics(csv_path: Path, log_text: str) -> dict[str, Any]:
     return metrics
 
 
-KEY_FIELDS = ("phase", "model", "layer", "M", "K", "N", "split_k", "trial")
+KEY_FIELDS = (
+    "phase", "model", "block_index", "layer", "M", "K", "N", "split_k", "trial",
+)
 
 
 def row_key(row: dict[str, Any]) -> tuple[str, ...]:
@@ -331,7 +394,11 @@ def row_key(row: dict[str, Any]) -> tuple[str, ...]:
 
 
 def case_key(phase: str, case: Case) -> tuple[str, ...]:
-    return tuple(map(str, (phase, case.model, case.layer, case.m, case.k, case.n, case.split_k, case.trial)))
+    block_index = "" if case.block_index is None else case.block_index
+    return tuple(map(str, (
+        phase, case.model, block_index, case.layer, case.m, case.k,
+        case.n, case.split_k, case.trial,
+    )))
 
 
 def load_rows(path: Path) -> list[dict[str, str]]:
@@ -356,7 +423,8 @@ def append_log(path: Path, phase: str, case: Case, status: str, text: str) -> No
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
         handle.write(
-            f"\n===== CASE START phase={phase} model={case.model} layer={case.layer} "
+            f"\n===== CASE START phase={phase} model={case.model} "
+            f"block={'' if case.block_index is None else case.block_index} layer={case.layer} "
             f"M={case.m} K={case.k} N={case.n} split_k={case.split_k} trial={case.trial} =====\n"
         )
         handle.write(text)
@@ -376,6 +444,24 @@ def execute_case(
         str(case.m), str(case.k), str(case.n), str(case.split_k),
         "--model", case.model, "--layer", case.layer,
     ]
+    input_config = config["input"]
+    command.extend(["--seed", str(input_config["seed"])])
+    weight_model_dir = ""
+    block_index: Any = "" if case.block_index is None else case.block_index
+    if "synthetic" not in input_config["weight_source"].lower():
+        weight_config = model_weight_config(config, case.model)
+        model_dir = Path(weight_config["model_dir"]).expanduser().resolve()
+        index_file = model_dir / "model.safetensors.index.json"
+        if not index_file.is_file():
+            raise FileNotFoundError(f"Safetensors index not found: {index_file}")
+        if case.block_index is None:
+            raise ValueError(f"Real-weight case has no block index: {case.model}")
+        block_index = case.block_index
+        weight_model_dir = str(model_dir)
+        command.extend([
+            "--model-dir", weight_model_dir,
+            "--block-index", str(block_index),
+        ])
     started_at, start = utc_now(), time.monotonic()
     status, error, returncode, log_text = "failed", "", None, ""
     metrics: dict[str, Any] = {}
@@ -413,8 +499,9 @@ def execute_case(
         "returncode": "" if returncode is None else returncode, "model": case.model,
         "layer": case.layer, "M": case.m, "K": case.k, "N": case.n,
         "split_k": case.split_k, "trial": case.trial, "warmup": settings["warmup"],
-        "repeat": settings["repeat"], "weight_source": config["input"]["weight_source"],
-        "seed": config["input"]["seed"], "compression_ratio": metrics.get("compression_ratio", ""),
+        "repeat": settings["repeat"], "weight_source": input_config["weight_source"],
+        "weight_model_dir": weight_model_dir, "block_index": block_index,
+        "seed": input_config["seed"], "compression_ratio": metrics.get("compression_ratio", ""),
         "log_file": str(log_file),
     })
     for kernel in ("cublas", "cublas_tc", "zipgemm"):
@@ -443,6 +530,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--log-file", type=Path)
     parser.add_argument("--models", nargs="+")
     parser.add_argument("--layers", nargs="+")
+    parser.add_argument("--block-index", type=int, help="Override the configured real-weight block")
     parser.add_argument("--batches", nargs="+", type=int)
     parser.add_argument("--splits", nargs="+", type=int)
     parser.add_argument("--max-cases", type=int)
@@ -489,20 +577,29 @@ def main() -> int:
         key = case_key(phase, case)
         existing = indexed.get(key)
         if existing and existing.get("status") == "ok" and not args.force:
-            print(f"[{index}/{len(cases)}] SKIP {case.model}/{case.layer} N={case.n} split={case.split_k}", flush=True)
+            block_label = "" if case.block_index is None else f"/block-{case.block_index}"
+            print(
+                f"[{index}/{len(cases)}] SKIP {case.model}{block_label}/{case.layer} "
+                f"N={case.n} split={case.split_k}", flush=True,
+            )
             continue
         row = execute_case(phase, case, config, env, log_file)
         indexed[key] = row
         write_rows(result_file, list(indexed.values()))
         if row["status"] == "ok":
             speedup = float(row["cublas_tc_latency_ms"]) / float(row["zipgemm_latency_ms"])
+            block_label = "" if case.block_index is None else f"/block-{case.block_index}"
             print(
-                f"[{index}/{len(cases)}] OK {case.model}/{case.layer} N={case.n} "
+                f"[{index}/{len(cases)}] OK {case.model}{block_label}/{case.layer} N={case.n} "
                 f"split={case.split_k} speedup={speedup:.3f}x", flush=True,
             )
         else:
             failures += 1
-            print(f"[{index}/{len(cases)}] FAIL {case.model}/{case.layer}: {row['error']}", file=sys.stderr, flush=True)
+            block_label = "" if case.block_index is None else f"/block-{case.block_index}"
+            print(
+                f"[{index}/{len(cases)}] FAIL {case.model}{block_label}/{case.layer}: {row['error']}",
+                file=sys.stderr, flush=True,
+            )
             if args.fail_fast:
                 break
     print(f"Completed with {failures} failed invocation(s): {result_file}")

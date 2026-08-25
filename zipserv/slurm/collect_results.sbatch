@@ -13,8 +13,9 @@ set -euo pipefail
 EXP_ROOT=/home/hybyun0207/aso-internship/zipserv
 MODE=$1
 RUN_DIR=$2
+CONFIG=${3:-$EXP_ROOT/configs/experiments.json}
 
 python3 "$EXP_ROOT/scripts/collect_results.py" \
   --mode "$MODE" \
   --run-dir "$RUN_DIR" \
-  --config "$EXP_ROOT/configs/experiments.json"
+  --config "$CONFIG"

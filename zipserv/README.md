@@ -21,9 +21,10 @@ Split-K 탐색은 한 번만 수행하고 이후 성능 실험에서 계속 재�
     → results/zipserv-rtx4090-synthetic-<date-time>-run/result_all.csv
 ```
 
-각 모델은 독립 Slurm job 하나에서 실행된다. 모델 job은 자기
-`raw/<model>/result.csv`만 기록하므로 동시 쓰기 충돌이 없다. 모든 모델 job이
-종료되면 dependency로 연결된 collector job이 최상위 `result_all.csv`를 만든다.
+각 모델은 기본적으로 독립 Slurm job 하나에서 실행된다. `--blocks`를 사용하면
+모델×block마다 별도 job과 `raw/<model>/block-<index>/result.csv`가 생성되므로
+동시 쓰기 충돌이 없다. 모든 job이 종료되면 dependency로 연결된 collector job이
+최상위 `result_all.csv`를 만든다.
 
 실험 디렉터리 이름에는 시스템, GPU, 가중치 종류, 날짜와 단계가 포함된다.
 
@@ -36,6 +37,10 @@ zipserv-rtx4090-synthetic-20260822-153000-run
 
 ```text
 zipserv/
+├── benchmark/
+│   ├── test_mm.cu
+│   ├── utils.h
+│   └── Makefile
 ├── configs/
 │   └── experiments.json
 ├── scripts/
@@ -67,16 +72,22 @@ scripts/build_benchmarks.sh
 생성물:
 
 ```text
-bin/test_mm_tune   warm-up 100, repeat 1000
+bin/test_mm_tune   warm-up 20, repeat 200
 bin/test_mm_final  warm-up 100, repeat 1000
 bin/libL_API.so
 bin/build_manifest.txt
 ```
 
-현재 tune과 final의 warm-up/repeat 설정이 같으므로 빌드 스크립트는 benchmark를
-한 번만 컴파일하고 `test_mm_tune`, `test_mm_final` 두 이름으로 동일 binary를
-배치한다. 두 이름은 runner가 실행 단계를 구분하기 위한 것이며 kernel이나 GEMM
-알고리즘 차이는 없다.
+현재 tune과 final의 warm-up/repeat 설정이 다르므로 빌드 스크립트는
+`test_mm_tune`과 `test_mm_final`을 별도로 컴파일한다. 두 binary의 kernel과 GEMM
+알고리즘은 같고 반복 횟수만 다르다.
+
+benchmark frontend인 `test_mm.cu`, `utils.h`, Makefile은 이 저장소의
+`benchmark/`에서 관리한다. `build_benchmarks.sh`는 이 로컬 소스를 컴파일하되,
+ZipGEMM kernel과 `L_API.cuh`/`libL_API.so`는 `configs/experiments.json`의
+`paths.zipserv_source`가 가리키는 외부 `ZipServ_ASPLOS26`에서 빌드한다. 따라서
+실제 weight loader 같은 실험 전용 변경은 원본 artifact가 아니라 로컬
+`benchmark/`에 적용한다.
 
 ## 2. Split-K tuning: 최초 한 번
 
@@ -103,9 +114,9 @@ slurm/run_zipserv.sh --mode tune --time 12:00:00
 ```
 
 현재 각 `(model, layer, N)`에 대해 Split-K `1, 2, 4, 8`을 각각 한 번
-실행한다. 각 실행 내부에서는 tune binary가 warm-up 100회와 측정 1000회를
-수행한다. 따라서 tuning 결과도 최종 실험과 동일한 반복 조건의 성능 결과로
-사용할 수 있다.
+실행한다. 각 실행 내부에서는 tune binary가 warm-up 20회와 측정 200회를
+수행한다. 최종 성능은 warm-up 100회, 측정 1000회, trial 3회인 final run에서
+별도로 측정한다.
 
 결과:
 
@@ -137,6 +148,23 @@ slurm/run_zipserv.sh \
   --mode tune \
   --tuning-dir results/tuning-cuda-new
 ```
+
+### Tuning과 final run 자동 연결
+
+`both` 모드는 tuning 모델 job, tuning collector, final 모델 job, final collector를
+Slurm dependency로 연결해 한 번에 제출한다. 모든 tuning 모델 job과 collector가
+성공해야 final 모델 job이 시작된다.
+
+```bash
+slurm/run_zipserv.sh \
+  --mode both \
+  --models llama3.1-8b llama3.1-70b \
+  --layers qkv_proj o_proj gateup_proj down_proj lm_head \
+  --time 12:00:00
+```
+
+대기 중인 final job은 `squeue`에서 dependency 상태로 보이며 사용자가 별도로
+`run` 명령을 실행할 필요가 없다.
 
 ## 3. 성능 실험
 
@@ -182,6 +210,43 @@ slurm/run_zipserv.sh \
   --models llama3.1-8b
 ```
 
+### 실제 가중치의 여러 transformer block 실행
+
+`--blocks`는 `MODEL=IDX[,IDX...]` 형식이다. config의 `block_index`를 수정하지 않고
+모델×block별 Slurm job을 제출하며, 기존 block 0 tuning의 Split-K를 재사용할 수
+있다. `--models`를 생략하면 `--blocks`에 적은 모델만 자동으로 선택한다.
+
+```bash
+slurm/run_zipserv.sh \
+  --mode run \
+  --blocks llama3.1-8b=16,31 llama3.1-70b=40,79 \
+  --layers qkv_proj o_proj gateup_proj down_proj \
+  --tuning-dir results/zipserv-rtx4090-llama31realblock0-20260825-tuning \
+  --time 12:00:00
+```
+
+위 명령은 네 개의 model/block job을 제출한다. `lm_head`는 transformer block과
+무관한 공통 가중치이므로 block 비교에서는 제외한다.
+
+```text
+logs/
+├── llama3.1-8b-block-16.log
+├── llama3.1-8b-block-31.log
+├── llama3.1-70b-block-40.log
+└── llama3.1-70b-block-79.log
+raw/
+├── llama3.1-8b/
+│   ├── block-16/result.csv
+│   └── block-31/result.csv
+└── llama3.1-70b/
+    ├── block-40/result.csv
+    └── block-79/result.csv
+```
+
+자동 생성되는 결과 디렉터리 이름에도 요청한 모델과 block 번호가 포함된다.
+각 Slurm job과 collector는 제출 시 복사한 `experiments.json`을 사용하므로 작업이
+대기 중일 때 원본 config를 수정해도 이미 제출된 실험에는 영향을 주지 않는다.
+
 ## 중단 후 재개
 
 제출 시 출력된 run directory를 다시 넘긴다.
@@ -193,9 +258,9 @@ slurm/run_zipserv.sh \
   --layers qkv_proj o_proj
 ```
 
-성공한 `(phase, model, layer, M, K, N, Split-K, trial)` 행은 건너뛰고 실패하거나
-없는 행만 다시 실행한다. 동일한 run directory의 같은 모델 job을 동시에 두 개
-제출하면 안 된다.
+성공한 `(phase, model, block_index, layer, M, K, N, Split-K, trial)` 행은
+건너뛰고 실패하거나 없는 행만 다시 실행한다. 동일한 run directory의 같은
+model/block job을 동시에 두 개 제출하면 안 된다.
 
 ## Dry-run
 
@@ -213,8 +278,8 @@ slurm/run_zipserv.sh --models llama3.1-8b --layers qkv_proj --dry-run
 
 ```text
 phase, status, error
-model, layer, M, K, N, split_k, trial
-warmup, repeat, weight_source, seed
+model, block_index, layer, M, K, N, split_k, trial
+warmup, repeat, weight_source, weight_model_dir, seed
 cublas_latency_ms, cublas_tflops
 cublas_tc_latency_ms, cublas_tc_tflops
 zipgemm_latency_ms, zipgemm_tflops
@@ -276,6 +341,28 @@ tuning 결과를 다시 집계하려면 `--mode tune`을 사용한다.
 python3 plots/plot_results.py \
   --results-root results/zipserv-rtx4090-synthetic-20260822-153000-run
 ```
+
+Split-K tuning latency를 모델별로 시각화하려면 다음을 실행한다. 결과 경로를
+생략하면 가장 최근의 `zipserv-*-tuning` 디렉터리를 자동으로 사용한다.
+
+```bash
+python3 plots/plot_latency_by_splitk.py
+```
+
+각 모델마다 `plots/latency_by_splitk/<model>_latency_by_splitk.png`를 만든다.
+상단은 레이어별 최적 Split-K를 batch별 막대로, 중단은 다섯 레이어 각각의
+Split-K별 latency를, 하단은 Split-K=1 대비 최적 speedup을 보여준다.
+
+LLaMA 3.1 8B/70B의 selected Split-K 결과에 대한 수치 오차 그래프는 다음과
+같이 생성한다.
+
+```bash
+python3 plots/plot_llama_error.py
+```
+
+`plots/llama_error/`에 모델별 PNG를 만든다. cuBLAS non-TC를 기준으로
+cuBLAS TC와 ZipServ의 평균 상대 오차, 원소당 평균 절대 오차, 상대 오차가
+`1e-4`를 넘는 원소 비율을 비교한다. 두 모델은 동일한 y축 범위를 사용한다.
 
 CUDA 배경 지식과 ZipServ 원본 코드 읽기 순서는
 [`source/README.md`](source/README.md)에 정리되어 있다.

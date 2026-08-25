@@ -30,12 +30,20 @@ TUNE_REPEAT=${SETTINGS[4]}
 FINAL_WARMUP=${SETTINGS[5]}
 FINAL_REPEAT=${SETTINGS[6]}
 
-BENCH_DIR=$ZIP_ROOT/kernel_benchmark
+BENCH_DIR=$EXP_ROOT/benchmark
 UTILS_HEADER=$BENCH_DIR/utils.h
 BIN_DIR=$EXP_ROOT/bin
 
-for required in "$CUDA_PATH/bin/nvcc" "$ZIP_ROOT/build/Makefile" \
-  "$BENCH_DIR/Makefile" "$UTILS_HEADER"; do
+for required in \
+  "$CUDA_PATH/bin/nvcc" \
+  "$ZIP_ROOT/build/Makefile" \
+  "$BENCH_DIR/Makefile" \
+  "$BENCH_DIR/test_mm.cu" \
+  "$BENCH_DIR/llama_weight_loader.h" \
+  "$BENCH_DIR/llama_weight_loader.cpp" \
+  "$UTILS_HEADER" \
+  "$EXP_ROOT/deps/safetensors-cpp/safetensors.hh" \
+  "$EXP_ROOT/deps/nlohmann-json/single_include/nlohmann/json.hpp"; do
   if [[ ! -e "$required" ]]; then
     echo "Missing required path: $required" >&2
     exit 1
@@ -106,11 +114,14 @@ trap - EXIT INT TERM
   printf 'zipserv_source=%s\n' "$ZIP_ROOT"
   printf 'cuda_path=%s\n' "$CUDA_PATH"
   printf 'sm=%s\n' "$SMS"
+  printf 'benchmark_dir=%s\n' "$BENCH_DIR"
   printf 'tune_warmup=%s\n' "$TUNE_WARMUP"
   printf 'tune_repeat=%s\n' "$TUNE_REPEAT"
   printf 'final_warmup=%s\n' "$FINAL_WARMUP"
   printf 'final_repeat=%s\n' "$FINAL_REPEAT"
   printf 'zipserv_commit=%s\n' "$(git -C "$ZIP_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
+  printf 'safetensors_cpp_commit=%s\n' "$(git -C "$EXP_ROOT/deps/safetensors-cpp" rev-parse HEAD 2>/dev/null || echo unknown)"
+  printf 'nlohmann_json_commit=%s\n' "$(git -C "$EXP_ROOT/deps/nlohmann-json" rev-parse HEAD 2>/dev/null || echo unknown)"
   printf 'built_at=%s\n' "$(date --iso-8601=seconds)"
 } > "$BIN_DIR/build_manifest.txt"
 

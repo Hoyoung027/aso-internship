@@ -36,7 +36,7 @@ def write_csv(path: Path, fields: list[str], rows: list[dict[str, Any]]) -> None
 
 
 def collect_rows(run_dir: Path) -> tuple[list[str], list[dict[str, str]]]:
-    paths = sorted((run_dir / "raw").glob("*/result.csv"))
+    paths = sorted((run_dir / "raw").rglob("result.csv"))
     fields: list[str] = []
     rows: list[dict[str, str]] = []
     for path in paths:
@@ -46,7 +46,8 @@ def collect_rows(run_dir: Path) -> tuple[list[str], list[dict[str, str]]]:
                 fields = list(reader.fieldnames or [])
             rows.extend(reader)
     rows.sort(key=lambda row: (
-        row.get("model", ""), row.get("layer", ""), int(row.get("N", 0)),
+        row.get("model", ""), int(row.get("block_index") or -1),
+        row.get("layer", ""), int(row.get("N", 0)),
         int(row.get("split_k", 0)), int(row.get("trial", 0)),
     ))
     return fields, rows
@@ -54,11 +55,14 @@ def collect_rows(run_dir: Path) -> tuple[list[str], list[dict[str, str]]]:
 
 def select_splitk(rows: list[dict[str, str]], config: dict[str, Any]) -> list[dict[str, Any]]:
     expected_trials = config["phases"]["tune"]["trials"]
-    grouped: dict[tuple[str, str, int, int, int], dict[int, list[float]]] = {}
+    grouped: dict[tuple[str, str, str, int, int, int], dict[int, list[float]]] = {}
     for row in rows:
         if row.get("phase") != "tune" or row.get("status") != "ok":
             continue
-        key = (row["model"], row["layer"], int(row["M"]), int(row["K"]), int(row["N"]))
+        key = (
+            row["model"], row.get("block_index", ""), row["layer"],
+            int(row["M"]), int(row["K"]), int(row["N"]),
+        )
         grouped.setdefault(key, {}).setdefault(int(row["split_k"]), []).append(
             float(row["zipgemm_latency_ms"])
         )
@@ -72,7 +76,8 @@ def select_splitk(rows: list[dict[str, str]], config: dict[str, Any]) -> list[di
             continue
         median_ms, split_k, values = min(candidates, key=lambda item: (item[0], item[1]))
         selections.append({
-            "model": key[0], "layer": key[1], "M": key[2], "K": key[3], "N": key[4],
+            "model": key[0], "block_index": key[1], "layer": key[2],
+            "M": key[3], "K": key[4], "N": key[5],
             "split_k": split_k, "median_zipgemm_ms": median_ms,
             "trial_count": len(values), "candidate_count": len(candidates),
         })
@@ -80,13 +85,13 @@ def select_splitk(rows: list[dict[str, str]], config: dict[str, Any]) -> list[di
 
 
 def performance_summary(rows: list[dict[str, str]]) -> list[dict[str, Any]]:
-    grouped: dict[tuple[str, str, int, int, int, int], list[dict[str, str]]] = {}
+    grouped: dict[tuple[str, str, str, int, int, int, int], list[dict[str, str]]] = {}
     for row in rows:
         if row.get("phase") != "run" or row.get("status") != "ok":
             continue
         key = (
-            row["model"], row["layer"], int(row["M"]), int(row["K"]),
-            int(row["N"]), int(row["split_k"]),
+            row["model"], row.get("block_index", ""), row["layer"],
+            int(row["M"]), int(row["K"]), int(row["N"]), int(row["split_k"]),
         )
         grouped.setdefault(key, []).append(row)
     summary = []
@@ -96,8 +101,9 @@ def performance_summary(rows: list[dict[str, str]]) -> list[dict[str, Any]]:
         non_tc_ms = statistics.median(float(row["cublas_latency_ms"]) for row in group)
         ratios = [float(row["compression_ratio"]) for row in group if row.get("compression_ratio")]
         summary.append({
-            "model": key[0], "layer": key[1], "M": key[2], "K": key[3],
-            "N": key[4], "split_k": key[5], "trials": len(group),
+            "model": key[0], "block_index": key[1], "layer": key[2],
+            "M": key[3], "K": key[4], "N": key[5], "split_k": key[6],
+            "trials": len(group),
             "cublas_non_tc_median_ms": non_tc_ms, "cublas_tc_median_ms": tc_ms,
             "zipgemm_median_ms": zip_ms,
             "tc_speedup_vs_non_tc": non_tc_ms / tc_ms,
@@ -126,7 +132,7 @@ def main() -> int:
     write_csv(run_dir / "failures.csv", fields, failures)
     if args.mode == "tune":
         selection_fields = [
-            "model", "layer", "M", "K", "N", "split_k", "median_zipgemm_ms",
+            "model", "block_index", "layer", "M", "K", "N", "split_k", "median_zipgemm_ms",
             "trial_count", "candidate_count",
         ]
         selections = select_splitk(rows, config)
@@ -134,7 +140,7 @@ def main() -> int:
         print(f"Collected {len(rows)} tuning rows; selected {len(selections)} Split-K values")
     else:
         summary_fields = [
-            "model", "layer", "M", "K", "N", "split_k", "trials",
+            "model", "block_index", "layer", "M", "K", "N", "split_k", "trials",
             "cublas_non_tc_median_ms", "cublas_tc_median_ms", "zipgemm_median_ms",
             "tc_speedup_vs_non_tc", "zipgemm_speedup_vs_non_tc", "zipgemm_speedup_vs_tc",
             "compression_ratio",

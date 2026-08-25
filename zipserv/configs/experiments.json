@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "ZipServ synthetic-weight ZipGEMM vs cuBLAS_TC reproduction matrix",
+  "description": "ZipServ real Llama 3.1 8B/70B block-0 ZipGEMM vs cuBLAS experiments",
   "paths": {
     "zipserv_source": "/home/hybyun0207/ZipServ_ASPLOS26",
     "cuda_path": "/opt/ohpc/pub/apps/cuda/12.8"
@@ -13,7 +13,7 @@
     ]
   },
   "input": {
-    "weight_source": "zipserv_synthetic_exponent_distribution",
+    "weight_source": "llama3.1_real_block0",
     "seed": 12345,
     "dtype": "bf16"
   },
@@ -23,14 +23,14 @@
   },
   "phases": {
     "tune": {
-      "warmup": 100,
-      "repeat": 1000,
+      "warmup": 20,
+      "repeat": 200,
       "trials": 1
     },
     "final": {
       "warmup": 100,
       "repeat": 1000,
-      "trials": 1
+      "trials": 3
     }
   },
   "timeout_seconds": 1800,
@@ -38,6 +38,10 @@
     {
       "id": "llama3.1-8b",
       "source_config": "meta-llama/Llama-3.1-8B-Instruct",
+      "weight": {
+        "model_dir": "/lustre/hybyun0207/models/Llama-3.1-8B-Instruct",
+        "block_index": 0
+      },
       "enabled": true,
       "layers": [
         {"id": "qkv_proj", "M": 6144, "K": 4096},
@@ -50,6 +54,10 @@
     {
       "id": "llama3.1-70b",
       "source_config": "meta-llama/Llama-3.1-70B-Instruct",
+      "weight": {
+        "model_dir": "/lustre/hybyun0207/models/Llama-3.1-70B-Instruct",
+        "block_index": 0
+      },
       "enabled": true,
       "layers": [
         {"id": "qkv_proj", "M": 10240, "K": 8192},
