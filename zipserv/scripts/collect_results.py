@@ -42,9 +42,12 @@ def collect_rows(run_dir: Path) -> tuple[list[str], list[dict[str, str]]]:
     for path in paths:
         with path.open(newline="", encoding="utf-8") as handle:
             reader = csv.DictReader(handle)
-            if not fields:
-                fields = list(reader.fieldnames or [])
+            # Preserve added metrics even when older per-model CSVs coexist.
+            fields.extend(field for field in (reader.fieldnames or []) if field not in fields)
             rows.extend(reader)
+    dtypes = {row.get("partial_dtype") or "bf16" for row in rows}
+    if len(dtypes) > 1:
+        raise ValueError("Mixed partial dtypes in one result directory; collect BF16 and FP32 separately")
     rows.sort(key=lambda row: (
         row.get("model", ""), int(row.get("block_index") or -1),
         row.get("layer", ""), int(row.get("N", 0)),
@@ -76,6 +79,7 @@ def select_splitk(rows: list[dict[str, str]], config: dict[str, Any]) -> list[di
             continue
         median_ms, split_k, values = min(candidates, key=lambda item: (item[0], item[1]))
         selections.append({
+            "partial_dtype": rows[0].get("partial_dtype") or "bf16",
             "model": key[0], "block_index": key[1], "layer": key[2],
             "M": key[3], "K": key[4], "N": key[5],
             "split_k": split_k, "median_zipgemm_ms": median_ms,
@@ -101,6 +105,7 @@ def performance_summary(rows: list[dict[str, str]]) -> list[dict[str, Any]]:
         non_tc_ms = statistics.median(float(row["cublas_latency_ms"]) for row in group)
         ratios = [float(row["compression_ratio"]) for row in group if row.get("compression_ratio")]
         summary.append({
+            "partial_dtype": group[0].get("partial_dtype") or "bf16",
             "model": key[0], "block_index": key[1], "layer": key[2],
             "M": key[3], "K": key[4], "N": key[5], "split_k": key[6],
             "trials": len(group),
@@ -133,7 +138,7 @@ def main() -> int:
     if args.mode == "tune":
         selection_fields = [
             "model", "block_index", "layer", "M", "K", "N", "split_k", "median_zipgemm_ms",
-            "trial_count", "candidate_count",
+            "trial_count", "candidate_count", "partial_dtype",
         ]
         selections = select_splitk(rows, config)
         write_csv(run_dir / "selected_splitk.csv", selection_fields, selections)
@@ -143,7 +148,7 @@ def main() -> int:
             "model", "block_index", "layer", "M", "K", "N", "split_k", "trials",
             "cublas_non_tc_median_ms", "cublas_tc_median_ms", "zipgemm_median_ms",
             "tc_speedup_vs_non_tc", "zipgemm_speedup_vs_non_tc", "zipgemm_speedup_vs_tc",
-            "compression_ratio",
+            "compression_ratio", "partial_dtype",
         ]
         summary = performance_summary(rows)
         write_csv(run_dir / "summary.csv", summary_fields, summary)

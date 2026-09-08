@@ -163,6 +163,9 @@ def plot_model(
     splits: list[int],
     speedups: dict[tuple[str, str, int, int], float],
     shapes: dict[tuple[str, str], tuple[int, int]],
+    *,
+    title: str | None = None,
+    measurement_note: str = "",
 ) -> None:
     width = 1800
     panel_height = 345
@@ -183,14 +186,15 @@ def plot_model(
         .note{font-size:13px;fill:#596579}
         </style>"""
     )
-    title = f"{model} — Synthetic-weight Split-K speedup"
+    title = title or f"{model} — Synthetic-weight Split-K speedup"
     svg.append(
         f'<text x="{width / 2}" y="40" text-anchor="middle" '
         f'class="title">{html.escape(title)}</text>'
     )
     svg.append(
         f'<text x="{width / 2}" y="69" text-anchor="middle" class="subtitle">'
-        'Speedup = latency(K=1) / latency(candidate K) · higher is better</text>'
+        'Speedup = latency(K=1) / latency(candidate K) · higher is better'
+        f'{html.escape(measurement_note)}</text>'
     )
     add_legend(svg, width, splits)
 

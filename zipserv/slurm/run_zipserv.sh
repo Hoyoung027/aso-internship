@@ -16,6 +16,8 @@ Submit one Slurm job per model/block and one dependent collector job.
 Options:
   --mode tune|run|both       Split-K tuning, performance run, or both in sequence
                              (default: run)
+  --partial-dtype bf16|fp32  Split-K partial-sum storage (default: bf16)
+                             FP32 run requires an explicit --tuning-dir to reuse
   --models MODEL [...]       Models to run (default: all enabled models)
   --blocks MODEL=IDX,...     Override real-weight blocks; one job per model/block
                              (with --models all, selects the listed models)
@@ -37,6 +39,7 @@ EOF
 }
 
 MODE=run
+PARTIAL_DTYPE=bf16
 MODELS=(all)
 BLOCK_SPECS=()
 LAYERS=(all)
@@ -46,6 +49,14 @@ DRY_RUN=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --partial-dtype)
+      [[ $# -ge 2 ]] || { echo "--partial-dtype requires bf16 or fp32." >&2; exit 2; }
+      PARTIAL_DTYPE=$2
+      [[ "$PARTIAL_DTYPE" == bf16 || "$PARTIAL_DTYPE" == fp32 ]] || {
+        echo "Invalid partial dtype: $PARTIAL_DTYPE (expected bf16 or fp32)." >&2; exit 2;
+      }
+      shift 2
+      ;;
     --mode)
       [[ $# -ge 2 ]] || { echo "--mode requires tune, run, or both." >&2; exit 2; }
       MODE=$2
@@ -105,6 +116,11 @@ while [[ $# -gt 0 ]]; do
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
 done
+
+if [[ "$MODE" == run && "$PARTIAL_DTYPE" == fp32 && -z "$TUNING_DIR" ]]; then
+  echo "FP32 run requires --tuning-dir; explicitly choose the Split-K selection to reuse." >&2
+  exit 2
+fi
 
 mapfile -t PLAN < <(
   python3 - "$CONFIG" "${MODELS[*]}" "${LAYERS[*]}" "${BLOCK_SPECS[*]}" <<'PY'
@@ -310,7 +326,27 @@ print("-blocks-" + "-".join(parts))
 PY
   )
 fi
-RUN_WEIGHT_TAG=${WEIGHT_TAG}${BLOCK_TAG}
+RUN_WEIGHT_TAG=${WEIGHT_TAG}${BLOCK_TAG}-partial-${PARTIAL_DTYPE}
+
+snapshot_config() {
+  python3 - "$CONFIG" "$1/experiments.json" "$PARTIAL_DTYPE" <<'PY'
+import csv
+import json
+import sys
+from pathlib import Path
+source, destination, dtype = sys.argv[1:]
+path = Path(destination)
+if path.exists() and json.loads(path.read_text()).get('partial_dtype', 'bf16') != dtype:
+    raise SystemExit('Refusing to overwrite a result directory with a different partial dtype')
+for result in (path.parent / 'raw').rglob('result.csv'):
+    with result.open() as handle:
+        if any((row.get('partial_dtype') or 'bf16') != dtype for row in csv.DictReader(handle)):
+            raise SystemExit(f'Mixed partial dtype: use a new result directory, not {path.parent}')
+config = json.loads(Path(source).read_text())
+config['partial_dtype'] = dtype
+path.write_text(json.dumps(config, indent=2, ensure_ascii=False) + '\n')
+PY
+}
 
 mkdir -p "$RESULT_ROOT"
 
@@ -342,12 +378,13 @@ submit_both_model_jobs() {
       command+=(--dependency="afterok:$dependency_id")
     fi
     command+=(
-      --job-name="zip-${safe_model}${block_suffix}-${phase}"
+      --job-name="zip-${safe_model}${block_suffix}-${phase}-${PARTIAL_DTYPE}"
       --time="$WALL_TIME"
       --output="$phase_dir/logs/${model}${block_suffix}-slurm-%j.out"
       "$SCRIPT_DIR/run_zipserv.sbatch"
       "$phase"
       --config "$phase_dir/experiments.json"
+      --partial-dtype "$PARTIAL_DTYPE"
       --models "$model"
       --layers "${layers[@]}"
       --output-dir "$model_dir"
@@ -419,8 +456,8 @@ if [[ "$MODE" == both ]]; then
   }
 
   mkdir -p "$TUNING_DIR/raw" "$TUNING_DIR/logs" "$RUN_DIR/raw" "$RUN_DIR/logs"
-  cp -p "$CONFIG" "$TUNING_DIR/experiments.json"
-  cp -p "$CONFIG" "$RUN_DIR/experiments.json"
+  snapshot_config "$TUNING_DIR"
+  snapshot_config "$RUN_DIR"
 
   echo "Mode: both"
   echo "Tuning directory: $TUNING_DIR"
@@ -455,6 +492,19 @@ else
     shopt -u nullglob
     for ((index=${#tuning_candidates[@]} - 1; index >= 0; index--)); do
       if [[ -f "${tuning_candidates[index]}/selected_splitk.csv" ]]; then
+        # Automatic reuse is only within the same storage precision. Cross-dtype
+        # comparisons must name --tuning-dir explicitly.
+        if ! python3 - "${tuning_candidates[index]}/experiments.json" "$PARTIAL_DTYPE" <<'PY'
+import json
+import sys
+from pathlib import Path
+path = Path(sys.argv[1])
+dtype = json.loads(path.read_text()).get('partial_dtype', 'bf16') if path.is_file() else 'bf16'
+raise SystemExit(0 if dtype == sys.argv[2] else 1)
+PY
+        then
+          continue
+        fi
         TUNING_DIR=${tuning_candidates[index]}
         break
       fi
@@ -476,9 +526,10 @@ else
 fi
 
 mkdir -p "$RUN_DIR/raw" "$RUN_DIR/logs"
-cp -p "$CONFIG" "$RUN_DIR/experiments.json"
+snapshot_config "$RUN_DIR"
 
 echo "Mode: $MODE"
+echo "Partial dtype: $PARTIAL_DTYPE"
 echo "Run directory: $RUN_DIR"
 echo "Model/block jobs: ${#PLAN[@]}"
 
@@ -500,12 +551,13 @@ for item in "${PLAN[@]}"; do
   safe_model=${model//./_}
   command=(
     sbatch --parsable
-    --job-name="zip-${safe_model}${block_suffix}-${MODE}"
+    --job-name="zip-${safe_model}${block_suffix}-${MODE}-${PARTIAL_DTYPE}"
     --time="$WALL_TIME"
     --output="$RUN_DIR/logs/${model}${block_suffix}-slurm-%j.out"
     "$SCRIPT_DIR/run_zipserv.sbatch"
     "$MODE"
     --config "$RUN_DIR/experiments.json"
+    --partial-dtype "$PARTIAL_DTYPE"
     --models "$model"
     --layers "${layers[@]}"
     --output-dir "$model_dir"

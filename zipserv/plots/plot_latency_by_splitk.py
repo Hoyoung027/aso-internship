@@ -45,10 +45,12 @@ def load_config(path: Path) -> dict[str, Any]:
         return json.load(handle)
 
 
-def load_latencies(path: Path) -> dict[tuple[str, str, int, int], float]:
+def load_latencies(path: Path, block_index: int = 0) -> dict[tuple[str, str, int, int], float]:
     grouped: dict[tuple[str, str, int, int], list[float]] = defaultdict(list)
     with path.open(newline="", encoding="utf-8") as handle:
         for row in csv.DictReader(handle):
+            if int(row.get("block_index") or 0) != block_index:
+                continue
             if row.get("phase") != "tune" or row.get("status") != "ok":
                 continue
             value = row.get("zipgemm_latency_ms", "")
@@ -109,6 +111,7 @@ def plot_model(
     batches: list[int],
     splits: list[int],
     latency: dict[tuple[str, str, int, int], float],
+    title: str | None = None,
 ) -> None:
     width, height = 1800, 1320
     svg = svg_document(width, height)
@@ -123,7 +126,7 @@ def plot_model(
         .axis-line{stroke:#283548;stroke-width:1.5}.best-label{font-size:12px;font-weight:700}
         </style>"""
     )
-    svg.append(f'<text x="{width / 2}" y="38" text-anchor="middle" class="title">{html.escape(model)} — ZipGEMM Split-K tuning</text>')
+    svg.append(f'<text x="{width / 2}" y="38" text-anchor="middle" class="title">{html.escape(title or model)} — ZipGEMM Split-K tuning</text>')
     svg.append(f'<text x="{width / 2}" y="66" text-anchor="middle" class="subtitle">Selected Split-K · absolute latency across candidates · best tuning speedup over Split-K=1</text>')
     add_legend(svg, width, batches, 96)
 
@@ -271,7 +274,8 @@ def plot_model(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--results-root", type=Path, help="Tuning directory containing result_all.csv; default: latest")
-    parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    parser.add_argument("--config", type=Path, help="Default: experiment snapshot, or current config if absent")
+    parser.add_argument("--block-index", type=int, default=0, help="Never pool blocks; default: 0")
     parser.add_argument("--models", nargs="+", help="Default: every enabled model present in the tuning result")
     parser.add_argument("--output-dir", type=Path, default=Path(__file__).resolve().parent / "latency_by_splitk")
     parser.add_argument(
@@ -294,21 +298,27 @@ def main() -> int:
     result_file = results_root / "result_all.csv"
     if not result_file.is_file():
         raise FileNotFoundError(f"Tuning result not found: {result_file}")
-    config = load_config(args.config.expanduser().resolve())
+    if args.block_index < 0:
+        raise ValueError("--block-index must be non-negative")
+    config_path = args.config or results_root / "experiments.json"
+    if not config_path.is_file() and args.config is None:
+        config_path = DEFAULT_CONFIG
+    config = load_config(config_path.expanduser().resolve())
     enabled = {model["id"]: model for model in config["models"] if model.get("enabled", True)}
-    available = {key[0] for key in load_latencies(result_file)}
+    available = {key[0] for key in load_latencies(result_file, args.block_index)}
     models = args.models or [model for model in enabled if model in available]
     unknown = [model for model in models if model not in enabled]
     if unknown:
         raise ValueError(f"Unknown or disabled models: {unknown}")
-    latency = load_latencies(result_file)
+    latency = load_latencies(result_file, args.block_index)
     batches = config["matrix"]["batches"]
     splits = config["matrix"]["split_k_candidates"]
     output_dir = args.output_dir.expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     created = []
     for model in models:
-        layers = [layer["id"] for layer in enabled[model]["layers"]]
+        layers = [layer["id"] for layer in enabled[model]["layers"]
+                  if layer.get("block_scoped", True) or args.block_index == 0]
         layer_shapes = {
             layer["id"]: (int(layer["M"]), int(layer["K"]))
             for layer in enabled[model]["layers"]
@@ -318,9 +328,11 @@ def main() -> int:
         if missing and not args.allow_incomplete:
             print(f"SKIP {model}: missing {len(missing)}/{len(expected)} tuning points", file=sys.stderr)
             continue
-        svg_path = output_dir / f"{model}_latency_by_splitk.svg"
-        png_path = output_dir / f"{model}_latency_by_splitk.png"
-        plot_model(svg_path, model, layers, layer_shapes, batches, splits, latency)
+        suffix = "" if args.block_index == 0 else f"_block-{args.block_index}"
+        svg_path = output_dir / f"{model}{suffix}_latency_by_splitk.svg"
+        png_path = output_dir / f"{model}{suffix}_latency_by_splitk.png"
+        plot_model(svg_path, model, layers, layer_shapes, batches, splits, latency,
+                   title=f"{model} · Block {args.block_index}")
         svg_to_png(svg_path, png_path, args.png_scale)
         if not args.keep_svg:
             svg_path.unlink()

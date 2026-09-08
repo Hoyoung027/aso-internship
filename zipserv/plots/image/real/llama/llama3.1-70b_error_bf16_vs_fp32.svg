@@ -1,0 +1,602 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1950" viewBox="0 0 1800 1950">
+<rect width="100%" height="100%" fill="white"/>
+<style>
+        text{font-family:'Liberation Serif','Times New Roman',serif;fill:#111}
+        .main-title{font-size:27px;font-weight:700}
+        .subtitle{font-size:16px}
+        .panel-title{font-size:22px;font-weight:700}
+        .axis{font-size:15px}
+        .bar-value{font-size:12px}
+        .x-label{font-size:17px}
+        .legend{font-size:17px}
+        .family-label{font-size:16px;font-weight:700}
+        .missing{font-size:16px;font-style:italic;fill:#666}
+        .grid{stroke:#d8d8d8;stroke-width:1}
+        .axis-line{stroke:#111;stroke-width:1.5}
+        .baseline{stroke:#555;stroke-width:2;stroke-dasharray:8 5}
+        .bar{stroke:#111;stroke-width:1}
+        </style>
+<style>
+        text{font-family:'Liberation Sans','Arial',sans-serif;fill:#172033}
+        .title{font-size:29px;font-weight:700}.subtitle{font-size:15px;fill:#526078}
+        .row-title{font-size:19px;font-weight:700}.batch-title{font-size:18px;font-weight:700}
+        .axis{font-size:11px}.axis-label{font-size:14px;font-weight:700}
+        .layer{font-size:12px;font-weight:700}.shape{font-size:9px;fill:#68758a}
+        .legend{font-size:15px}.k-label{font-size:10px;font-weight:700}
+        .note{font-size:13px;fill:#596579}.grid{stroke:#dce2ea;stroke-width:1}
+        .axis-line{stroke:#283548;stroke-width:1.4}.bar{stroke:#263342;stroke-width:.7}
+        </style>
+<style>.val-label{font-size:9px;font-weight:600}</style>
+<text x="900.0" y="38" text-anchor="middle" class="title">LLaMA 3.1 70B — partial-sum dtype error comparison</text>
+<text x="900.0" y="65" text-anchor="middle" class="subtitle">Reference: cuBLAS TC · real weights (block 0 + shared LM Head) · synthetic BF16 activations · final run, median of 3 trials</text>
+<rect x="550.00" y="87" width="28" height="16" rx="2" fill="#9aa5b1" class="bar"/>
+<text x="588.00" y="100" class="legend">cuBLAS TC (reference, error = 0)</text>
+<rect x="810.00" y="87" width="28" height="16" rx="2" fill="#e8743b" class="bar"/>
+<text x="848.00" y="100" class="legend">ZipServ · bf16 partial sums</text>
+<rect x="1070.00" y="87" width="28" height="16" rx="2" fill="#2b83ba" class="bar"/>
+<text x="1108.00" y="100" class="legend">ZipServ · fp32 partial sums</text>
+<text x="362.67" y="126" text-anchor="middle" class="batch-title">Batch size N=8</text>
+<text x="932.00" y="126" text-anchor="middle" class="batch-title">Batch size N=16</text>
+<text x="1501.33" y="126" text-anchor="middle" class="batch-title">Batch size N=32</text>
+<text x="900.0" y="153.00" text-anchor="middle" class="row-title">A. Mean element-wise relative error</text>
+<text x="18" y="325.00" text-anchor="middle" transform="rotate(-90 18 325.00)" class="axis-label">Mean relative error (%)</text>
+<rect x="158.00" y="180.0" width="93.07" height="290.00" fill="#f6f8fb"/>
+<rect x="344.13" y="180.0" width="93.07" height="290.00" fill="#f6f8fb"/>
+<rect x="530.27" y="180.0" width="93.07" height="290.00" fill="#f6f8fb"/>
+<line x1="158.0" y1="470.00" x2="623.3333333333334" y2="470.00" class="grid"/>
+<text x="151.0" y="474.00" text-anchor="end" class="axis">0.001%</text>
+<line x1="158.0" y1="397.50" x2="623.3333333333334" y2="397.50" class="grid"/>
+<text x="151.0" y="401.50" text-anchor="end" class="axis">0.01%</text>
+<line x1="158.0" y1="325.00" x2="623.3333333333334" y2="325.00" class="grid"/>
+<text x="151.0" y="329.00" text-anchor="end" class="axis">0.1%</text>
+<line x1="158.0" y1="252.50" x2="623.3333333333334" y2="252.50" class="grid"/>
+<text x="151.0" y="256.50" text-anchor="end" class="axis">1%</text>
+<line x1="158.0" y1="180.00" x2="623.3333333333334" y2="180.00" class="grid"/>
+<text x="151.0" y="184.00" text-anchor="end" class="axis">10%</text>
+<line x1="158.0" y1="180.0" x2="158.0" y2="470.0" class="axis-line"/>
+<line x1="158.0" y1="470.0" x2="623.3333333333334" y2="470.0" class="axis-line"/>
+<text x="180.53" y="466.00" text-anchor="start" class="val-label" transform="rotate(-90 180.53 466.00)">0</text>
+<rect x="195.03" y="252.38" width="19.00" height="217.62" rx="2" fill="#e8743b" class="bar"/>
+<rect x="219.03" y="414.22" width="19.00" height="55.78" rx="2" fill="#2b83ba" class="bar"/>
+<text x="204.53" y="246.38" text-anchor="middle" class="k-label">K=8</text>
+<text x="204.53" y="488.0" text-anchor="middle" class="layer">QKV</text>
+<text x="204.53" y="503.0" text-anchor="middle" class="shape">10,240×8,192</text>
+<text x="273.60" y="466.00" text-anchor="start" class="val-label" transform="rotate(-90 273.60 466.00)">0</text>
+<rect x="288.10" y="253.21" width="19.00" height="216.79" rx="2" fill="#e8743b" class="bar"/>
+<rect x="312.10" y="435.44" width="19.00" height="34.56" rx="2" fill="#2b83ba" class="bar"/>
+<text x="297.60" y="247.21" text-anchor="middle" class="k-label">K=8</text>
+<text x="297.60" y="488.0" text-anchor="middle" class="layer">O</text>
+<text x="297.60" y="503.0" text-anchor="middle" class="shape">8,192×8,192</text>
+<text x="366.66" y="466.00" text-anchor="start" class="val-label" transform="rotate(-90 366.66 466.00)">0</text>
+<rect x="381.17" y="272.67" width="19.00" height="197.33" rx="2" fill="#e8743b" class="bar"/>
+<rect x="405.17" y="427.51" width="19.00" height="42.49" rx="2" fill="#2b83ba" class="bar"/>
+<text x="390.67" y="266.67" text-anchor="middle" class="k-label">K=2</text>
+<text x="390.67" y="488.0" text-anchor="middle" class="layer">GateUp</text>
+<text x="390.67" y="503.0" text-anchor="middle" class="shape">57,344×8,192</text>
+<text x="459.73" y="466.00" text-anchor="start" class="val-label" transform="rotate(-90 459.73 466.00)">0</text>
+<rect x="474.23" y="270.87" width="19.00" height="199.13" rx="2" fill="#e8743b" class="bar"/>
+<rect x="498.23" y="396.58" width="19.00" height="73.42" rx="2" fill="#2b83ba" class="bar"/>
+<text x="483.73" y="264.87" text-anchor="middle" class="k-label">K=2</text>
+<text x="483.73" y="488.0" text-anchor="middle" class="layer">Down</text>
+<text x="483.73" y="503.0" text-anchor="middle" class="shape">8,192×28,672</text>
+<text x="552.80" y="466.00" text-anchor="start" class="val-label" transform="rotate(-90 552.80 466.00)">0</text>
+<rect x="567.30" y="244.97" width="19.00" height="225.03" rx="2" fill="#e8743b" class="bar"/>
+<rect x="591.30" y="428.21" width="19.00" height="41.79" rx="2" fill="#2b83ba" class="bar"/>
+<text x="576.80" y="238.97" text-anchor="middle" class="k-label">K=4</text>
+<text x="576.80" y="488.0" text-anchor="middle" class="layer">LM Head</text>
+<text x="576.80" y="503.0" text-anchor="middle" class="shape">128,256×8,192</text>
+<rect x="727.33" y="180.0" width="93.07" height="290.00" fill="#f6f8fb"/>
+<rect x="913.47" y="180.0" width="93.07" height="290.00" fill="#f6f8fb"/>
+<rect x="1099.60" y="180.0" width="93.07" height="290.00" fill="#f6f8fb"/>
+<line x1="727.3333333333334" y1="470.00" x2="1192.6666666666667" y2="470.00" class="grid"/>
+<text x="720.3333333333334" y="474.00" text-anchor="end" class="axis">0.001%</text>
+<line x1="727.3333333333334" y1="397.50" x2="1192.6666666666667" y2="397.50" class="grid"/>
+<text x="720.3333333333334" y="401.50" text-anchor="end" class="axis">0.01%</text>
+<line x1="727.3333333333334" y1="325.00" x2="1192.6666666666667" y2="325.00" class="grid"/>
+<text x="720.3333333333334" y="329.00" text-anchor="end" class="axis">0.1%</text>
+<line x1="727.3333333333334" y1="252.50" x2="1192.6666666666667" y2="252.50" class="grid"/>
+<text x="720.3333333333334" y="256.50" text-anchor="end" class="axis">1%</text>
+<line x1="727.3333333333334" y1="180.00" x2="1192.6666666666667" y2="180.00" class="grid"/>
+<text x="720.3333333333334" y="184.00" text-anchor="end" class="axis">10%</text>
+<line x1="727.3333333333334" y1="180.0" x2="727.3333333333334" y2="470.0" class="axis-line"/>
+<line x1="727.3333333333334" y1="470.0" x2="1192.6666666666667" y2="470.0" class="axis-line"/>
+<text x="749.86" y="466.00" text-anchor="start" class="val-label" transform="rotate(-90 749.86 466.00)">0</text>
+<rect x="764.37" y="273.04" width="19.00" height="196.96" rx="2" fill="#e8743b" class="bar"/>
+<rect x="788.37" y="425.04" width="19.00" height="44.96" rx="2" fill="#2b83ba" class="bar"/>
+<text x="773.87" y="267.04" text-anchor="middle" class="k-label">K=2</text>
+<text x="773.87" y="488.0" text-anchor="middle" class="layer">QKV</text>
+<text x="773.87" y="503.0" text-anchor="middle" class="shape">10,240×8,192</text>
+<text x="842.93" y="466.00" text-anchor="start" class="val-label" transform="rotate(-90 842.93 466.00)">0</text>
+<rect x="857.43" y="247.71" width="19.00" height="222.29" rx="2" fill="#e8743b" class="bar"/>
+<rect x="881.43" y="435.98" width="19.00" height="34.02" rx="2" fill="#2b83ba" class="bar"/>
+<text x="866.93" y="241.71" text-anchor="middle" class="k-label">K=8</text>
+<text x="866.93" y="488.0" text-anchor="middle" class="layer">O</text>
+<text x="866.93" y="503.0" text-anchor="middle" class="shape">8,192×8,192</text>
+<text x="936.00" y="466.00" text-anchor="start" class="val-label" transform="rotate(-90 936.00 466.00)">0</text>
+<rect x="950.50" y="275.31" width="19.00" height="194.69" rx="2" fill="#e8743b" class="bar"/>
+<rect x="974.50" y="430.73" width="19.00" height="39.27" rx="2" fill="#2b83ba" class="bar"/>
+<text x="960.00" y="269.31" text-anchor="middle" class="k-label">K=2</text>
+<text x="960.00" y="488.0" text-anchor="middle" class="layer">GateUp</text>
+<text x="960.00" y="503.0" text-anchor="middle" class="shape">57,344×8,192</text>
+<text x="1029.06" y="466.00" text-anchor="start" class="val-label" transform="rotate(-90 1029.06 466.00)">0</text>
+<rect x="1043.57" y="269.77" width="19.00" height="200.23" rx="2" fill="#e8743b" class="bar"/>
+<rect x="1067.57" y="396.35" width="19.00" height="73.65" rx="2" fill="#2b83ba" class="bar"/>
+<text x="1053.07" y="263.77" text-anchor="middle" class="k-label">K=2</text>
+<text x="1053.07" y="488.0" text-anchor="middle" class="layer">Down</text>
+<text x="1053.07" y="503.0" text-anchor="middle" class="shape">8,192×28,672</text>
+<text x="1122.13" y="466.00" text-anchor="start" class="val-label" transform="rotate(-90 1122.13 466.00)">0</text>
+<rect x="1136.63" y="248.09" width="19.00" height="221.91" rx="2" fill="#e8743b" class="bar"/>
+<rect x="1160.63" y="427.90" width="19.00" height="42.10" rx="2" fill="#2b83ba" class="bar"/>
+<text x="1146.13" y="242.09" text-anchor="middle" class="k-label">K=4</text>
+<text x="1146.13" y="488.0" text-anchor="middle" class="layer">LM Head</text>
+<text x="1146.13" y="503.0" text-anchor="middle" class="shape">128,256×8,192</text>
+<rect x="1296.67" y="180.0" width="93.07" height="290.00" fill="#f6f8fb"/>
+<rect x="1482.80" y="180.0" width="93.07" height="290.00" fill="#f6f8fb"/>
+<rect x="1668.93" y="180.0" width="93.07" height="290.00" fill="#f6f8fb"/>
+<line x1="1296.6666666666667" y1="470.00" x2="1762.0" y2="470.00" class="grid"/>
+<text x="1289.6666666666667" y="474.00" text-anchor="end" class="axis">0.001%</text>
+<line x1="1296.6666666666667" y1="397.50" x2="1762.0" y2="397.50" class="grid"/>
+<text x="1289.6666666666667" y="401.50" text-anchor="end" class="axis">0.01%</text>
+<line x1="1296.6666666666667" y1="325.00" x2="1762.0" y2="325.00" class="grid"/>
+<text x="1289.6666666666667" y="329.00" text-anchor="end" class="axis">0.1%</text>
+<line x1="1296.6666666666667" y1="252.50" x2="1762.0" y2="252.50" class="grid"/>
+<text x="1289.6666666666667" y="256.50" text-anchor="end" class="axis">1%</text>
+<line x1="1296.6666666666667" y1="180.00" x2="1762.0" y2="180.00" class="grid"/>
+<text x="1289.6666666666667" y="184.00" text-anchor="end" class="axis">10%</text>
+<line x1="1296.6666666666667" y1="180.0" x2="1296.6666666666667" y2="470.0" class="axis-line"/>
+<line x1="1296.6666666666667" y1="470.0" x2="1762.0" y2="470.0" class="axis-line"/>
+<text x="1319.20" y="466.00" text-anchor="start" class="val-label" transform="rotate(-90 1319.20 466.00)">0</text>
+<rect x="1333.70" y="259.38" width="19.00" height="210.62" rx="2" fill="#e8743b" class="bar"/>
+<rect x="1357.70" y="271.22" width="19.00" height="198.78" rx="2" fill="#2b83ba" class="bar"/>
+<text x="1343.20" y="253.38" text-anchor="middle" class="k-label">K=4</text>
+<text x="1343.20" y="488.0" text-anchor="middle" class="layer">QKV</text>
+<text x="1343.20" y="503.0" text-anchor="middle" class="shape">10,240×8,192</text>
+<text x="1412.26" y="466.00" text-anchor="start" class="val-label" transform="rotate(-90 1412.26 466.00)">0</text>
+<rect x="1426.77" y="246.18" width="19.00" height="223.82" rx="2" fill="#e8743b" class="bar"/>
+<rect x="1450.77" y="431.46" width="19.00" height="38.54" rx="2" fill="#2b83ba" class="bar"/>
+<text x="1436.27" y="240.18" text-anchor="middle" class="k-label">K=8</text>
+<text x="1436.27" y="488.0" text-anchor="middle" class="layer">O</text>
+<text x="1436.27" y="503.0" text-anchor="middle" class="shape">8,192×8,192</text>
+<text x="1505.33" y="466.00" text-anchor="start" class="val-label" transform="rotate(-90 1505.33 466.00)">0</text>
+<rect x="1519.83" y="253.67" width="19.00" height="216.33" rx="2" fill="#e8743b" class="bar"/>
+<rect x="1543.83" y="253.67" width="19.00" height="216.33" rx="2" fill="#2b83ba" class="bar"/>
+<text x="1529.33" y="247.67" text-anchor="middle" class="k-label">K=1</text>
+<text x="1529.33" y="488.0" text-anchor="middle" class="layer">GateUp</text>
+<text x="1529.33" y="503.0" text-anchor="middle" class="shape">57,344×8,192</text>
+<text x="1598.40" y="466.00" text-anchor="start" class="val-label" transform="rotate(-90 1598.40 466.00)">0</text>
+<rect x="1612.90" y="431.91" width="19.00" height="38.09" rx="2" fill="#e8743b" class="bar"/>
+<rect x="1636.90" y="261.97" width="19.00" height="208.03" rx="2" fill="#2b83ba" class="bar"/>
+<text x="1622.40" y="255.97" text-anchor="middle" class="k-label">K=4</text>
+<text x="1622.40" y="488.0" text-anchor="middle" class="layer">Down</text>
+<text x="1622.40" y="503.0" text-anchor="middle" class="shape">8,192×28,672</text>
+<text x="1691.46" y="466.00" text-anchor="start" class="val-label" transform="rotate(-90 1691.46 466.00)">0</text>
+<text x="1715.47" y="466.00" text-anchor="start" class="val-label" transform="rotate(-90 1715.47 466.00)">0</text>
+<text x="1739.47" y="466.00" text-anchor="start" class="val-label" transform="rotate(-90 1739.47 466.00)">0</text>
+<text x="1715.47" y="450.00" text-anchor="middle" class="k-label">K=1</text>
+<text x="1715.47" y="488.0" text-anchor="middle" class="layer">LM Head</text>
+<text x="1715.47" y="503.0" text-anchor="middle" class="shape">128,256×8,192</text>
+<text x="900.0" y="613.00" text-anchor="middle" class="row-title">B. Mean absolute error per output element</text>
+<text x="18" y="785.00" text-anchor="middle" transform="rotate(-90 18 785.00)" class="axis-label">Mean absolute error / element</text>
+<rect x="158.00" y="640.0" width="93.07" height="290.00" fill="#f6f8fb"/>
+<rect x="344.13" y="640.0" width="93.07" height="290.00" fill="#f6f8fb"/>
+<rect x="530.27" y="640.0" width="93.07" height="290.00" fill="#f6f8fb"/>
+<line x1="158.0" y1="930.00" x2="623.3333333333334" y2="930.00" class="grid"/>
+<text x="151.0" y="934.00" text-anchor="end" class="axis">1e-07</text>
+<line x1="158.0" y1="857.50" x2="623.3333333333334" y2="857.50" class="grid"/>
+<text x="151.0" y="861.50" text-anchor="end" class="axis">1e-06</text>
+<line x1="158.0" y1="785.00" x2="623.3333333333334" y2="785.00" class="grid"/>
+<text x="151.0" y="789.00" text-anchor="end" class="axis">1e-05</text>
+<line x1="158.0" y1="712.50" x2="623.3333333333334" y2="712.50" class="grid"/>
+<text x="151.0" y="716.50" text-anchor="end" class="axis">1e-04</text>
+<line x1="158.0" y1="640.00" x2="623.3333333333334" y2="640.00" class="grid"/>
+<text x="151.0" y="644.00" text-anchor="end" class="axis">1e-03</text>
+<line x1="158.0" y1="640.0" x2="158.0" y2="930.0" class="axis-line"/>
+<line x1="158.0" y1="930.0" x2="623.3333333333334" y2="930.0" class="axis-line"/>
+<text x="180.53" y="926.00" text-anchor="start" class="val-label" transform="rotate(-90 180.53 926.00)">0</text>
+<rect x="195.03" y="654.21" width="19.00" height="275.79" rx="2" fill="#e8743b" class="bar"/>
+<rect x="219.03" y="816.80" width="19.00" height="113.20" rx="2" fill="#2b83ba" class="bar"/>
+<text x="204.53" y="652.00" text-anchor="middle" class="k-label">K=8</text>
+<text x="204.53" y="948.0" text-anchor="middle" class="layer">QKV</text>
+<text x="204.53" y="963.0" text-anchor="middle" class="shape">10,240×8,192</text>
+<text x="273.60" y="926.00" text-anchor="start" class="val-label" transform="rotate(-90 273.60 926.00)">0</text>
+<rect x="288.10" y="738.21" width="19.00" height="191.79" rx="2" fill="#e8743b" class="bar"/>
+<rect x="312.10" y="898.43" width="19.00" height="31.57" rx="2" fill="#2b83ba" class="bar"/>
+<text x="297.60" y="732.21" text-anchor="middle" class="k-label">K=8</text>
+<text x="297.60" y="948.0" text-anchor="middle" class="layer">O</text>
+<text x="297.60" y="963.0" text-anchor="middle" class="shape">8,192×8,192</text>
+<text x="366.66" y="926.00" text-anchor="start" class="val-label" transform="rotate(-90 366.66 926.00)">0</text>
+<rect x="381.17" y="693.01" width="19.00" height="236.99" rx="2" fill="#e8743b" class="bar"/>
+<rect x="405.17" y="868.37" width="19.00" height="61.63" rx="2" fill="#2b83ba" class="bar"/>
+<text x="390.67" y="687.01" text-anchor="middle" class="k-label">K=2</text>
+<text x="390.67" y="948.0" text-anchor="middle" class="layer">GateUp</text>
+<text x="390.67" y="963.0" text-anchor="middle" class="shape">57,344×8,192</text>
+<text x="459.73" y="926.00" text-anchor="start" class="val-label" transform="rotate(-90 459.73 926.00)">0</text>
+<rect x="474.23" y="708.52" width="19.00" height="221.48" rx="2" fill="#e8743b" class="bar"/>
+<rect x="498.23" y="840.54" width="19.00" height="89.46" rx="2" fill="#2b83ba" class="bar"/>
+<text x="483.73" y="702.52" text-anchor="middle" class="k-label">K=2</text>
+<text x="483.73" y="948.0" text-anchor="middle" class="layer">Down</text>
+<text x="483.73" y="963.0" text-anchor="middle" class="shape">8,192×28,672</text>
+<text x="552.80" y="926.00" text-anchor="start" class="val-label" transform="rotate(-90 552.80 926.00)">0</text>
+<rect x="567.30" y="723.19" width="19.00" height="206.81" rx="2" fill="#e8743b" class="bar"/>
+<rect x="591.30" y="889.36" width="19.00" height="40.64" rx="2" fill="#2b83ba" class="bar"/>
+<text x="576.80" y="717.19" text-anchor="middle" class="k-label">K=4</text>
+<text x="576.80" y="948.0" text-anchor="middle" class="layer">LM Head</text>
+<text x="576.80" y="963.0" text-anchor="middle" class="shape">128,256×8,192</text>
+<rect x="727.33" y="640.0" width="93.07" height="290.00" fill="#f6f8fb"/>
+<rect x="913.47" y="640.0" width="93.07" height="290.00" fill="#f6f8fb"/>
+<rect x="1099.60" y="640.0" width="93.07" height="290.00" fill="#f6f8fb"/>
+<line x1="727.3333333333334" y1="930.00" x2="1192.6666666666667" y2="930.00" class="grid"/>
+<text x="720.3333333333334" y="934.00" text-anchor="end" class="axis">1e-07</text>
+<line x1="727.3333333333334" y1="857.50" x2="1192.6666666666667" y2="857.50" class="grid"/>
+<text x="720.3333333333334" y="861.50" text-anchor="end" class="axis">1e-06</text>
+<line x1="727.3333333333334" y1="785.00" x2="1192.6666666666667" y2="785.00" class="grid"/>
+<text x="720.3333333333334" y="789.00" text-anchor="end" class="axis">1e-05</text>
+<line x1="727.3333333333334" y1="712.50" x2="1192.6666666666667" y2="712.50" class="grid"/>
+<text x="720.3333333333334" y="716.50" text-anchor="end" class="axis">1e-04</text>
+<line x1="727.3333333333334" y1="640.00" x2="1192.6666666666667" y2="640.00" class="grid"/>
+<text x="720.3333333333334" y="644.00" text-anchor="end" class="axis">1e-03</text>
+<line x1="727.3333333333334" y1="640.0" x2="727.3333333333334" y2="930.0" class="axis-line"/>
+<line x1="727.3333333333334" y1="930.0" x2="1192.6666666666667" y2="930.0" class="axis-line"/>
+<text x="749.86" y="926.00" text-anchor="start" class="val-label" transform="rotate(-90 749.86 926.00)">0</text>
+<rect x="764.37" y="652.68" width="19.00" height="277.32" rx="2" fill="#e8743b" class="bar"/>
+<rect x="788.37" y="822.35" width="19.00" height="107.65" rx="2" fill="#2b83ba" class="bar"/>
+<text x="773.87" y="652.00" text-anchor="middle" class="k-label">K=2</text>
+<text x="773.87" y="948.0" text-anchor="middle" class="layer">QKV</text>
+<text x="773.87" y="963.0" text-anchor="middle" class="shape">10,240×8,192</text>
+<text x="842.93" y="926.00" text-anchor="start" class="val-label" transform="rotate(-90 842.93 926.00)">0</text>
+<rect x="857.43" y="738.20" width="19.00" height="191.80" rx="2" fill="#e8743b" class="bar"/>
+<rect x="881.43" y="896.24" width="19.00" height="33.76" rx="2" fill="#2b83ba" class="bar"/>
+<text x="866.93" y="732.20" text-anchor="middle" class="k-label">K=8</text>
+<text x="866.93" y="948.0" text-anchor="middle" class="layer">O</text>
+<text x="866.93" y="963.0" text-anchor="middle" class="shape">8,192×8,192</text>
+<text x="936.00" y="926.00" text-anchor="start" class="val-label" transform="rotate(-90 936.00 926.00)">0</text>
+<rect x="950.50" y="683.32" width="19.00" height="246.68" rx="2" fill="#e8743b" class="bar"/>
+<rect x="974.50" y="870.09" width="19.00" height="59.91" rx="2" fill="#2b83ba" class="bar"/>
+<text x="960.00" y="677.32" text-anchor="middle" class="k-label">K=2</text>
+<text x="960.00" y="948.0" text-anchor="middle" class="layer">GateUp</text>
+<text x="960.00" y="963.0" text-anchor="middle" class="shape">57,344×8,192</text>
+<text x="1029.06" y="926.00" text-anchor="start" class="val-label" transform="rotate(-90 1029.06 926.00)">0</text>
+<rect x="1043.57" y="708.75" width="19.00" height="221.25" rx="2" fill="#e8743b" class="bar"/>
+<rect x="1067.57" y="842.69" width="19.00" height="87.31" rx="2" fill="#2b83ba" class="bar"/>
+<text x="1053.07" y="702.75" text-anchor="middle" class="k-label">K=2</text>
+<text x="1053.07" y="948.0" text-anchor="middle" class="layer">Down</text>
+<text x="1053.07" y="963.0" text-anchor="middle" class="shape">8,192×28,672</text>
+<text x="1122.13" y="926.00" text-anchor="start" class="val-label" transform="rotate(-90 1122.13 926.00)">0</text>
+<rect x="1136.63" y="723.23" width="19.00" height="206.77" rx="2" fill="#e8743b" class="bar"/>
+<rect x="1160.63" y="889.93" width="19.00" height="40.07" rx="2" fill="#2b83ba" class="bar"/>
+<text x="1146.13" y="717.23" text-anchor="middle" class="k-label">K=4</text>
+<text x="1146.13" y="948.0" text-anchor="middle" class="layer">LM Head</text>
+<text x="1146.13" y="963.0" text-anchor="middle" class="shape">128,256×8,192</text>
+<rect x="1296.67" y="640.0" width="93.07" height="290.00" fill="#f6f8fb"/>
+<rect x="1482.80" y="640.0" width="93.07" height="290.00" fill="#f6f8fb"/>
+<rect x="1668.93" y="640.0" width="93.07" height="290.00" fill="#f6f8fb"/>
+<line x1="1296.6666666666667" y1="930.00" x2="1762.0" y2="930.00" class="grid"/>
+<text x="1289.6666666666667" y="934.00" text-anchor="end" class="axis">1e-07</text>
+<line x1="1296.6666666666667" y1="857.50" x2="1762.0" y2="857.50" class="grid"/>
+<text x="1289.6666666666667" y="861.50" text-anchor="end" class="axis">1e-06</text>
+<line x1="1296.6666666666667" y1="785.00" x2="1762.0" y2="785.00" class="grid"/>
+<text x="1289.6666666666667" y="789.00" text-anchor="end" class="axis">1e-05</text>
+<line x1="1296.6666666666667" y1="712.50" x2="1762.0" y2="712.50" class="grid"/>
+<text x="1289.6666666666667" y="716.50" text-anchor="end" class="axis">1e-04</text>
+<line x1="1296.6666666666667" y1="640.00" x2="1762.0" y2="640.00" class="grid"/>
+<text x="1289.6666666666667" y="644.00" text-anchor="end" class="axis">1e-03</text>
+<line x1="1296.6666666666667" y1="640.0" x2="1296.6666666666667" y2="930.0" class="axis-line"/>
+<line x1="1296.6666666666667" y1="930.0" x2="1762.0" y2="930.0" class="axis-line"/>
+<text x="1319.20" y="926.00" text-anchor="start" class="val-label" transform="rotate(-90 1319.20 926.00)">0</text>
+<rect x="1333.70" y="642.45" width="19.00" height="287.55" rx="2" fill="#e8743b" class="bar"/>
+<rect x="1357.70" y="651.90" width="19.00" height="278.10" rx="2" fill="#2b83ba" class="bar"/>
+<text x="1343.20" y="652.00" text-anchor="middle" class="k-label">K=4</text>
+<text x="1343.20" y="948.0" text-anchor="middle" class="layer">QKV</text>
+<text x="1343.20" y="963.0" text-anchor="middle" class="shape">10,240×8,192</text>
+<text x="1412.26" y="926.00" text-anchor="start" class="val-label" transform="rotate(-90 1412.26 926.00)">0</text>
+<rect x="1426.77" y="738.27" width="19.00" height="191.73" rx="2" fill="#e8743b" class="bar"/>
+<rect x="1450.77" y="898.90" width="19.00" height="31.10" rx="2" fill="#2b83ba" class="bar"/>
+<text x="1436.27" y="732.27" text-anchor="middle" class="k-label">K=8</text>
+<text x="1436.27" y="948.0" text-anchor="middle" class="layer">O</text>
+<text x="1436.27" y="963.0" text-anchor="middle" class="shape">8,192×8,192</text>
+<text x="1505.33" y="926.00" text-anchor="start" class="val-label" transform="rotate(-90 1505.33 926.00)">0</text>
+<rect x="1519.83" y="699.80" width="19.00" height="230.20" rx="2" fill="#e8743b" class="bar"/>
+<rect x="1543.83" y="699.80" width="19.00" height="230.20" rx="2" fill="#2b83ba" class="bar"/>
+<text x="1529.33" y="693.80" text-anchor="middle" class="k-label">K=1</text>
+<text x="1529.33" y="948.0" text-anchor="middle" class="layer">GateUp</text>
+<text x="1529.33" y="963.0" text-anchor="middle" class="shape">57,344×8,192</text>
+<text x="1598.40" y="926.00" text-anchor="start" class="val-label" transform="rotate(-90 1598.40 926.00)">0</text>
+<rect x="1612.90" y="868.40" width="19.00" height="61.60" rx="2" fill="#e8743b" class="bar"/>
+<rect x="1636.90" y="709.38" width="19.00" height="220.62" rx="2" fill="#2b83ba" class="bar"/>
+<text x="1622.40" y="703.38" text-anchor="middle" class="k-label">K=4</text>
+<text x="1622.40" y="948.0" text-anchor="middle" class="layer">Down</text>
+<text x="1622.40" y="963.0" text-anchor="middle" class="shape">8,192×28,672</text>
+<text x="1691.46" y="926.00" text-anchor="start" class="val-label" transform="rotate(-90 1691.46 926.00)">0</text>
+<text x="1715.47" y="926.00" text-anchor="start" class="val-label" transform="rotate(-90 1715.47 926.00)">0</text>
+<text x="1739.47" y="926.00" text-anchor="start" class="val-label" transform="rotate(-90 1739.47 926.00)">0</text>
+<text x="1715.47" y="910.00" text-anchor="middle" class="k-label">K=1</text>
+<text x="1715.47" y="948.0" text-anchor="middle" class="layer">LM Head</text>
+<text x="1715.47" y="963.0" text-anchor="middle" class="shape">128,256×8,192</text>
+<text x="900.0" y="1073.00" text-anchor="middle" class="row-title">C. Elements with relative error > 1e-4 (0.01%)</text>
+<text x="18" y="1245.00" text-anchor="middle" transform="rotate(-90 18 1245.00)" class="axis-label">Significant elements (%)</text>
+<rect x="158.00" y="1100.0" width="93.07" height="290.00" fill="#f6f8fb"/>
+<rect x="344.13" y="1100.0" width="93.07" height="290.00" fill="#f6f8fb"/>
+<rect x="530.27" y="1100.0" width="93.07" height="290.00" fill="#f6f8fb"/>
+<line x1="158.0" y1="1390.00" x2="623.3333333333334" y2="1390.00" class="grid"/>
+<text x="151.0" y="1394.00" text-anchor="end" class="axis">0%</text>
+<line x1="158.0" y1="1332.00" x2="623.3333333333334" y2="1332.00" class="grid"/>
+<text x="151.0" y="1336.00" text-anchor="end" class="axis">10%</text>
+<line x1="158.0" y1="1274.00" x2="623.3333333333334" y2="1274.00" class="grid"/>
+<text x="151.0" y="1278.00" text-anchor="end" class="axis">20%</text>
+<line x1="158.0" y1="1216.00" x2="623.3333333333334" y2="1216.00" class="grid"/>
+<text x="151.0" y="1220.00" text-anchor="end" class="axis">30%</text>
+<line x1="158.0" y1="1158.00" x2="623.3333333333334" y2="1158.00" class="grid"/>
+<text x="151.0" y="1162.00" text-anchor="end" class="axis">40%</text>
+<line x1="158.0" y1="1100.00" x2="623.3333333333334" y2="1100.00" class="grid"/>
+<text x="151.0" y="1104.00" text-anchor="end" class="axis">50%</text>
+<line x1="158.0" y1="1100.0" x2="158.0" y2="1390.0" class="axis-line"/>
+<line x1="158.0" y1="1390.0" x2="623.3333333333334" y2="1390.0" class="axis-line"/>
+<text x="180.53" y="1386.00" text-anchor="start" class="val-label" transform="rotate(-90 180.53 1386.00)">0</text>
+<rect x="195.03" y="1164.32" width="19.00" height="225.68" rx="2" fill="#e8743b" class="bar"/>
+<rect x="219.03" y="1386.58" width="19.00" height="3.42" rx="2" fill="#2b83ba" class="bar"/>
+<text x="204.53" y="1158.32" text-anchor="middle" class="k-label">K=8</text>
+<text x="204.53" y="1408.0" text-anchor="middle" class="layer">QKV</text>
+<text x="204.53" y="1423.0" text-anchor="middle" class="shape">10,240×8,192</text>
+<text x="273.60" y="1386.00" text-anchor="start" class="val-label" transform="rotate(-90 273.60 1386.00)">0</text>
+<rect x="288.10" y="1150.75" width="19.00" height="239.25" rx="2" fill="#e8743b" class="bar"/>
+<rect x="312.10" y="1387.39" width="19.00" height="2.61" rx="2" fill="#2b83ba" class="bar"/>
+<text x="297.60" y="1144.75" text-anchor="middle" class="k-label">K=8</text>
+<text x="297.60" y="1408.0" text-anchor="middle" class="layer">O</text>
+<text x="297.60" y="1423.0" text-anchor="middle" class="shape">8,192×8,192</text>
+<text x="366.66" y="1386.00" text-anchor="start" class="val-label" transform="rotate(-90 366.66 1386.00)">0</text>
+<rect x="381.17" y="1177.37" width="19.00" height="212.63" rx="2" fill="#e8743b" class="bar"/>
+<rect x="405.17" y="1387.56" width="19.00" height="2.44" rx="2" fill="#2b83ba" class="bar"/>
+<text x="390.67" y="1171.37" text-anchor="middle" class="k-label">K=2</text>
+<text x="390.67" y="1408.0" text-anchor="middle" class="layer">GateUp</text>
+<text x="390.67" y="1423.0" text-anchor="middle" class="shape">57,344×8,192</text>
+<text x="459.73" y="1386.00" text-anchor="start" class="val-label" transform="rotate(-90 459.73 1386.00)">0</text>
+<rect x="474.23" y="1172.79" width="19.00" height="217.21" rx="2" fill="#e8743b" class="bar"/>
+<rect x="498.23" y="1382.34" width="19.00" height="7.66" rx="2" fill="#2b83ba" class="bar"/>
+<text x="483.73" y="1166.79" text-anchor="middle" class="k-label">K=2</text>
+<text x="483.73" y="1408.0" text-anchor="middle" class="layer">Down</text>
+<text x="483.73" y="1423.0" text-anchor="middle" class="shape">8,192×28,672</text>
+<text x="552.80" y="1386.00" text-anchor="start" class="val-label" transform="rotate(-90 552.80 1386.00)">0</text>
+<rect x="567.30" y="1155.22" width="19.00" height="234.78" rx="2" fill="#e8743b" class="bar"/>
+<rect x="591.30" y="1387.51" width="19.00" height="2.49" rx="2" fill="#2b83ba" class="bar"/>
+<text x="576.80" y="1149.22" text-anchor="middle" class="k-label">K=4</text>
+<text x="576.80" y="1408.0" text-anchor="middle" class="layer">LM Head</text>
+<text x="576.80" y="1423.0" text-anchor="middle" class="shape">128,256×8,192</text>
+<rect x="727.33" y="1100.0" width="93.07" height="290.00" fill="#f6f8fb"/>
+<rect x="913.47" y="1100.0" width="93.07" height="290.00" fill="#f6f8fb"/>
+<rect x="1099.60" y="1100.0" width="93.07" height="290.00" fill="#f6f8fb"/>
+<line x1="727.3333333333334" y1="1390.00" x2="1192.6666666666667" y2="1390.00" class="grid"/>
+<text x="720.3333333333334" y="1394.00" text-anchor="end" class="axis">0%</text>
+<line x1="727.3333333333334" y1="1332.00" x2="1192.6666666666667" y2="1332.00" class="grid"/>
+<text x="720.3333333333334" y="1336.00" text-anchor="end" class="axis">10%</text>
+<line x1="727.3333333333334" y1="1274.00" x2="1192.6666666666667" y2="1274.00" class="grid"/>
+<text x="720.3333333333334" y="1278.00" text-anchor="end" class="axis">20%</text>
+<line x1="727.3333333333334" y1="1216.00" x2="1192.6666666666667" y2="1216.00" class="grid"/>
+<text x="720.3333333333334" y="1220.00" text-anchor="end" class="axis">30%</text>
+<line x1="727.3333333333334" y1="1158.00" x2="1192.6666666666667" y2="1158.00" class="grid"/>
+<text x="720.3333333333334" y="1162.00" text-anchor="end" class="axis">40%</text>
+<line x1="727.3333333333334" y1="1100.00" x2="1192.6666666666667" y2="1100.00" class="grid"/>
+<text x="720.3333333333334" y="1104.00" text-anchor="end" class="axis">50%</text>
+<line x1="727.3333333333334" y1="1100.0" x2="727.3333333333334" y2="1390.0" class="axis-line"/>
+<line x1="727.3333333333334" y1="1390.0" x2="1192.6666666666667" y2="1390.0" class="axis-line"/>
+<text x="749.86" y="1386.00" text-anchor="start" class="val-label" transform="rotate(-90 749.86 1386.00)">0</text>
+<rect x="764.37" y="1180.16" width="19.00" height="209.84" rx="2" fill="#e8743b" class="bar"/>
+<rect x="788.37" y="1387.22" width="19.00" height="2.78" rx="2" fill="#2b83ba" class="bar"/>
+<text x="773.87" y="1174.16" text-anchor="middle" class="k-label">K=2</text>
+<text x="773.87" y="1408.0" text-anchor="middle" class="layer">QKV</text>
+<text x="773.87" y="1423.0" text-anchor="middle" class="shape">10,240×8,192</text>
+<text x="842.93" y="1386.00" text-anchor="start" class="val-label" transform="rotate(-90 842.93 1386.00)">0</text>
+<rect x="857.43" y="1151.16" width="19.00" height="238.84" rx="2" fill="#e8743b" class="bar"/>
+<rect x="881.43" y="1387.45" width="19.00" height="2.55" rx="2" fill="#2b83ba" class="bar"/>
+<text x="866.93" y="1145.16" text-anchor="middle" class="k-label">K=8</text>
+<text x="866.93" y="1408.0" text-anchor="middle" class="layer">O</text>
+<text x="866.93" y="1423.0" text-anchor="middle" class="shape">8,192×8,192</text>
+<text x="936.00" y="1386.00" text-anchor="start" class="val-label" transform="rotate(-90 936.00 1386.00)">0</text>
+<rect x="950.50" y="1183.46" width="19.00" height="206.54" rx="2" fill="#e8743b" class="bar"/>
+<rect x="974.50" y="1387.85" width="19.00" height="2.15" rx="2" fill="#2b83ba" class="bar"/>
+<text x="960.00" y="1177.46" text-anchor="middle" class="k-label">K=2</text>
+<text x="960.00" y="1408.0" text-anchor="middle" class="layer">GateUp</text>
+<text x="960.00" y="1423.0" text-anchor="middle" class="shape">57,344×8,192</text>
+<text x="1029.06" y="1386.00" text-anchor="start" class="val-label" transform="rotate(-90 1029.06 1386.00)">0</text>
+<rect x="1043.57" y="1172.38" width="19.00" height="217.62" rx="2" fill="#e8743b" class="bar"/>
+<rect x="1067.57" y="1382.40" width="19.00" height="7.60" rx="2" fill="#2b83ba" class="bar"/>
+<text x="1053.07" y="1166.38" text-anchor="middle" class="k-label">K=2</text>
+<text x="1053.07" y="1408.0" text-anchor="middle" class="layer">Down</text>
+<text x="1053.07" y="1423.0" text-anchor="middle" class="shape">8,192×28,672</text>
+<text x="1122.13" y="1386.00" text-anchor="start" class="val-label" transform="rotate(-90 1122.13 1386.00)">0</text>
+<rect x="1136.63" y="1155.97" width="19.00" height="234.03" rx="2" fill="#e8743b" class="bar"/>
+<rect x="1160.63" y="1387.51" width="19.00" height="2.49" rx="2" fill="#2b83ba" class="bar"/>
+<text x="1146.13" y="1149.97" text-anchor="middle" class="k-label">K=4</text>
+<text x="1146.13" y="1408.0" text-anchor="middle" class="layer">LM Head</text>
+<text x="1146.13" y="1423.0" text-anchor="middle" class="shape">128,256×8,192</text>
+<rect x="1296.67" y="1100.0" width="93.07" height="290.00" fill="#f6f8fb"/>
+<rect x="1482.80" y="1100.0" width="93.07" height="290.00" fill="#f6f8fb"/>
+<rect x="1668.93" y="1100.0" width="93.07" height="290.00" fill="#f6f8fb"/>
+<line x1="1296.6666666666667" y1="1390.00" x2="1762.0" y2="1390.00" class="grid"/>
+<text x="1289.6666666666667" y="1394.00" text-anchor="end" class="axis">0%</text>
+<line x1="1296.6666666666667" y1="1332.00" x2="1762.0" y2="1332.00" class="grid"/>
+<text x="1289.6666666666667" y="1336.00" text-anchor="end" class="axis">10%</text>
+<line x1="1296.6666666666667" y1="1274.00" x2="1762.0" y2="1274.00" class="grid"/>
+<text x="1289.6666666666667" y="1278.00" text-anchor="end" class="axis">20%</text>
+<line x1="1296.6666666666667" y1="1216.00" x2="1762.0" y2="1216.00" class="grid"/>
+<text x="1289.6666666666667" y="1220.00" text-anchor="end" class="axis">30%</text>
+<line x1="1296.6666666666667" y1="1158.00" x2="1762.0" y2="1158.00" class="grid"/>
+<text x="1289.6666666666667" y="1162.00" text-anchor="end" class="axis">40%</text>
+<line x1="1296.6666666666667" y1="1100.00" x2="1762.0" y2="1100.00" class="grid"/>
+<text x="1289.6666666666667" y="1104.00" text-anchor="end" class="axis">50%</text>
+<line x1="1296.6666666666667" y1="1100.0" x2="1296.6666666666667" y2="1390.0" class="axis-line"/>
+<line x1="1296.6666666666667" y1="1390.0" x2="1762.0" y2="1390.0" class="axis-line"/>
+<text x="1319.20" y="1386.00" text-anchor="start" class="val-label" transform="rotate(-90 1319.20 1386.00)">0</text>
+<rect x="1333.70" y="1132.42" width="19.00" height="257.58" rx="2" fill="#e8743b" class="bar"/>
+<rect x="1357.70" y="1175.75" width="19.00" height="214.25" rx="2" fill="#2b83ba" class="bar"/>
+<text x="1343.20" y="1126.42" text-anchor="middle" class="k-label">K=4</text>
+<text x="1343.20" y="1408.0" text-anchor="middle" class="layer">QKV</text>
+<text x="1343.20" y="1423.0" text-anchor="middle" class="shape">10,240×8,192</text>
+<text x="1412.26" y="1386.00" text-anchor="start" class="val-label" transform="rotate(-90 1412.26 1386.00)">0</text>
+<rect x="1426.77" y="1151.33" width="19.00" height="238.67" rx="2" fill="#e8743b" class="bar"/>
+<rect x="1450.77" y="1387.51" width="19.00" height="2.49" rx="2" fill="#2b83ba" class="bar"/>
+<text x="1436.27" y="1145.33" text-anchor="middle" class="k-label">K=8</text>
+<text x="1436.27" y="1408.0" text-anchor="middle" class="layer">O</text>
+<text x="1436.27" y="1423.0" text-anchor="middle" class="shape">8,192×8,192</text>
+<text x="1505.33" y="1386.00" text-anchor="start" class="val-label" transform="rotate(-90 1505.33 1386.00)">0</text>
+<rect x="1519.83" y="1216.35" width="19.00" height="173.65" rx="2" fill="#e8743b" class="bar"/>
+<rect x="1543.83" y="1216.35" width="19.00" height="173.65" rx="2" fill="#2b83ba" class="bar"/>
+<text x="1529.33" y="1210.35" text-anchor="middle" class="k-label">K=1</text>
+<text x="1529.33" y="1408.0" text-anchor="middle" class="layer">GateUp</text>
+<text x="1529.33" y="1423.0" text-anchor="middle" class="shape">57,344×8,192</text>
+<text x="1598.40" y="1386.00" text-anchor="start" class="val-label" transform="rotate(-90 1598.40 1386.00)">0</text>
+<rect x="1612.90" y="1388.78" width="19.00" height="1.22" rx="2" fill="#e8743b" class="bar"/>
+<rect x="1636.90" y="1156.61" width="19.00" height="233.39" rx="2" fill="#2b83ba" class="bar"/>
+<text x="1622.40" y="1150.61" text-anchor="middle" class="k-label">K=4</text>
+<text x="1622.40" y="1408.0" text-anchor="middle" class="layer">Down</text>
+<text x="1622.40" y="1423.0" text-anchor="middle" class="shape">8,192×28,672</text>
+<text x="1691.46" y="1386.00" text-anchor="start" class="val-label" transform="rotate(-90 1691.46 1386.00)">0</text>
+<text x="1715.47" y="1386.00" text-anchor="start" class="val-label" transform="rotate(-90 1715.47 1386.00)">0</text>
+<text x="1739.47" y="1386.00" text-anchor="start" class="val-label" transform="rotate(-90 1739.47 1386.00)">0</text>
+<text x="1715.47" y="1370.00" text-anchor="middle" class="k-label">K=1</text>
+<text x="1715.47" y="1408.0" text-anchor="middle" class="layer">LM Head</text>
+<text x="1715.47" y="1423.0" text-anchor="middle" class="shape">128,256×8,192</text>
+<text x="900.0" y="1533.00" text-anchor="middle" class="row-title">D. Elements with absolute error > 1e-4 (output units)</text>
+<text x="18" y="1705.00" text-anchor="middle" transform="rotate(-90 18 1705.00)" class="axis-label">Absolute-error exceedance (%)</text>
+<rect x="158.00" y="1560.0" width="93.07" height="290.00" fill="#f6f8fb"/>
+<rect x="344.13" y="1560.0" width="93.07" height="290.00" fill="#f6f8fb"/>
+<rect x="530.27" y="1560.0" width="93.07" height="290.00" fill="#f6f8fb"/>
+<line x1="158.0" y1="1850.00" x2="623.3333333333334" y2="1850.00" class="grid"/>
+<text x="151.0" y="1854.00" text-anchor="end" class="axis">0%</text>
+<line x1="158.0" y1="1792.00" x2="623.3333333333334" y2="1792.00" class="grid"/>
+<text x="151.0" y="1796.00" text-anchor="end" class="axis">10%</text>
+<line x1="158.0" y1="1734.00" x2="623.3333333333334" y2="1734.00" class="grid"/>
+<text x="151.0" y="1738.00" text-anchor="end" class="axis">20%</text>
+<line x1="158.0" y1="1676.00" x2="623.3333333333334" y2="1676.00" class="grid"/>
+<text x="151.0" y="1680.00" text-anchor="end" class="axis">30%</text>
+<line x1="158.0" y1="1618.00" x2="623.3333333333334" y2="1618.00" class="grid"/>
+<text x="151.0" y="1622.00" text-anchor="end" class="axis">40%</text>
+<line x1="158.0" y1="1560.00" x2="623.3333333333334" y2="1560.00" class="grid"/>
+<text x="151.0" y="1564.00" text-anchor="end" class="axis">50%</text>
+<line x1="158.0" y1="1560.0" x2="158.0" y2="1850.0" class="axis-line"/>
+<line x1="158.0" y1="1850.0" x2="623.3333333333334" y2="1850.0" class="axis-line"/>
+<text x="180.53" y="1846.00" text-anchor="start" class="val-label" transform="rotate(-90 180.53 1846.00)">0</text>
+<rect x="195.03" y="1637.21" width="19.00" height="212.79" rx="2" fill="#e8743b" class="bar"/>
+<rect x="219.03" y="1848.56" width="19.00" height="1.44" rx="2" fill="#2b83ba" class="bar"/>
+<text x="204.53" y="1631.21" text-anchor="middle" class="k-label">K=8</text>
+<text x="204.53" y="1868.0" text-anchor="middle" class="layer">QKV</text>
+<text x="204.53" y="1883.0" text-anchor="middle" class="shape">10,240×8,192</text>
+<text x="273.60" y="1846.00" text-anchor="start" class="val-label" transform="rotate(-90 273.60 1846.00)">0</text>
+<rect x="288.10" y="1740.90" width="19.00" height="109.10" rx="2" fill="#e8743b" class="bar"/>
+<rect x="312.10" y="1849.39" width="19.00" height="0.61" rx="2" fill="#2b83ba" class="bar"/>
+<text x="297.60" y="1734.90" text-anchor="middle" class="k-label">K=8</text>
+<text x="297.60" y="1868.0" text-anchor="middle" class="layer">O</text>
+<text x="297.60" y="1883.0" text-anchor="middle" class="shape">8,192×8,192</text>
+<text x="366.66" y="1846.00" text-anchor="start" class="val-label" transform="rotate(-90 366.66 1846.00)">0</text>
+<rect x="381.17" y="1677.79" width="19.00" height="172.21" rx="2" fill="#e8743b" class="bar"/>
+<rect x="405.17" y="1849.25" width="19.00" height="0.75" rx="2" fill="#2b83ba" class="bar"/>
+<text x="390.67" y="1671.79" text-anchor="middle" class="k-label">K=2</text>
+<text x="390.67" y="1868.0" text-anchor="middle" class="layer">GateUp</text>
+<text x="390.67" y="1883.0" text-anchor="middle" class="shape">57,344×8,192</text>
+<text x="459.73" y="1846.00" text-anchor="start" class="val-label" transform="rotate(-90 459.73 1846.00)">0</text>
+<rect x="474.23" y="1674.94" width="19.00" height="175.06" rx="2" fill="#e8743b" class="bar"/>
+<rect x="498.23" y="1847.48" width="19.00" height="2.52" rx="2" fill="#2b83ba" class="bar"/>
+<text x="483.73" y="1668.94" text-anchor="middle" class="k-label">K=2</text>
+<text x="483.73" y="1868.0" text-anchor="middle" class="layer">Down</text>
+<text x="483.73" y="1883.0" text-anchor="middle" class="shape">8,192×28,672</text>
+<text x="552.80" y="1846.00" text-anchor="start" class="val-label" transform="rotate(-90 552.80 1846.00)">0</text>
+<rect x="567.30" y="1691.62" width="19.00" height="158.38" rx="2" fill="#e8743b" class="bar"/>
+<rect x="591.30" y="1849.36" width="19.00" height="0.64" rx="2" fill="#2b83ba" class="bar"/>
+<text x="576.80" y="1685.62" text-anchor="middle" class="k-label">K=4</text>
+<text x="576.80" y="1868.0" text-anchor="middle" class="layer">LM Head</text>
+<text x="576.80" y="1883.0" text-anchor="middle" class="shape">128,256×8,192</text>
+<rect x="727.33" y="1560.0" width="93.07" height="290.00" fill="#f6f8fb"/>
+<rect x="913.47" y="1560.0" width="93.07" height="290.00" fill="#f6f8fb"/>
+<rect x="1099.60" y="1560.0" width="93.07" height="290.00" fill="#f6f8fb"/>
+<line x1="727.3333333333334" y1="1850.00" x2="1192.6666666666667" y2="1850.00" class="grid"/>
+<text x="720.3333333333334" y="1854.00" text-anchor="end" class="axis">0%</text>
+<line x1="727.3333333333334" y1="1792.00" x2="1192.6666666666667" y2="1792.00" class="grid"/>
+<text x="720.3333333333334" y="1796.00" text-anchor="end" class="axis">10%</text>
+<line x1="727.3333333333334" y1="1734.00" x2="1192.6666666666667" y2="1734.00" class="grid"/>
+<text x="720.3333333333334" y="1738.00" text-anchor="end" class="axis">20%</text>
+<line x1="727.3333333333334" y1="1676.00" x2="1192.6666666666667" y2="1676.00" class="grid"/>
+<text x="720.3333333333334" y="1680.00" text-anchor="end" class="axis">30%</text>
+<line x1="727.3333333333334" y1="1618.00" x2="1192.6666666666667" y2="1618.00" class="grid"/>
+<text x="720.3333333333334" y="1622.00" text-anchor="end" class="axis">40%</text>
+<line x1="727.3333333333334" y1="1560.00" x2="1192.6666666666667" y2="1560.00" class="grid"/>
+<text x="720.3333333333334" y="1564.00" text-anchor="end" class="axis">50%</text>
+<line x1="727.3333333333334" y1="1560.0" x2="727.3333333333334" y2="1850.0" class="axis-line"/>
+<line x1="727.3333333333334" y1="1850.0" x2="1192.6666666666667" y2="1850.0" class="axis-line"/>
+<text x="749.86" y="1846.00" text-anchor="start" class="val-label" transform="rotate(-90 749.86 1846.00)">0</text>
+<rect x="764.37" y="1654.17" width="19.00" height="195.83" rx="2" fill="#e8743b" class="bar"/>
+<rect x="788.37" y="1848.84" width="19.00" height="1.16" rx="2" fill="#2b83ba" class="bar"/>
+<text x="773.87" y="1648.17" text-anchor="middle" class="k-label">K=2</text>
+<text x="773.87" y="1868.0" text-anchor="middle" class="layer">QKV</text>
+<text x="773.87" y="1883.0" text-anchor="middle" class="shape">10,240×8,192</text>
+<text x="842.93" y="1846.00" text-anchor="start" class="val-label" transform="rotate(-90 842.93 1846.00)">0</text>
+<rect x="857.43" y="1740.72" width="19.00" height="109.28" rx="2" fill="#e8743b" class="bar"/>
+<rect x="881.43" y="1849.36" width="19.00" height="0.64" rx="2" fill="#2b83ba" class="bar"/>
+<text x="866.93" y="1734.72" text-anchor="middle" class="k-label">K=8</text>
+<text x="866.93" y="1868.0" text-anchor="middle" class="layer">O</text>
+<text x="866.93" y="1883.0" text-anchor="middle" class="shape">8,192×8,192</text>
+<text x="936.00" y="1846.00" text-anchor="start" class="val-label" transform="rotate(-90 936.00 1846.00)">0</text>
+<rect x="950.50" y="1676.35" width="19.00" height="173.65" rx="2" fill="#e8743b" class="bar"/>
+<rect x="974.50" y="1849.34" width="19.00" height="0.66" rx="2" fill="#2b83ba" class="bar"/>
+<text x="960.00" y="1670.35" text-anchor="middle" class="k-label">K=2</text>
+<text x="960.00" y="1868.0" text-anchor="middle" class="layer">GateUp</text>
+<text x="960.00" y="1883.0" text-anchor="middle" class="shape">57,344×8,192</text>
+<text x="1029.06" y="1846.00" text-anchor="start" class="val-label" transform="rotate(-90 1029.06 1846.00)">0</text>
+<rect x="1043.57" y="1675.09" width="19.00" height="174.91" rx="2" fill="#e8743b" class="bar"/>
+<rect x="1067.57" y="1847.65" width="19.00" height="2.35" rx="2" fill="#2b83ba" class="bar"/>
+<text x="1053.07" y="1669.09" text-anchor="middle" class="k-label">K=2</text>
+<text x="1053.07" y="1868.0" text-anchor="middle" class="layer">Down</text>
+<text x="1053.07" y="1883.0" text-anchor="middle" class="shape">8,192×28,672</text>
+<text x="1122.13" y="1846.00" text-anchor="start" class="val-label" transform="rotate(-90 1122.13 1846.00)">0</text>
+<rect x="1136.63" y="1692.25" width="19.00" height="157.75" rx="2" fill="#e8743b" class="bar"/>
+<rect x="1160.63" y="1849.38" width="19.00" height="0.62" rx="2" fill="#2b83ba" class="bar"/>
+<text x="1146.13" y="1686.25" text-anchor="middle" class="k-label">K=4</text>
+<text x="1146.13" y="1868.0" text-anchor="middle" class="layer">LM Head</text>
+<text x="1146.13" y="1883.0" text-anchor="middle" class="shape">128,256×8,192</text>
+<rect x="1296.67" y="1560.0" width="93.07" height="290.00" fill="#f6f8fb"/>
+<rect x="1482.80" y="1560.0" width="93.07" height="290.00" fill="#f6f8fb"/>
+<rect x="1668.93" y="1560.0" width="93.07" height="290.00" fill="#f6f8fb"/>
+<line x1="1296.6666666666667" y1="1850.00" x2="1762.0" y2="1850.00" class="grid"/>
+<text x="1289.6666666666667" y="1854.00" text-anchor="end" class="axis">0%</text>
+<line x1="1296.6666666666667" y1="1792.00" x2="1762.0" y2="1792.00" class="grid"/>
+<text x="1289.6666666666667" y="1796.00" text-anchor="end" class="axis">10%</text>
+<line x1="1296.6666666666667" y1="1734.00" x2="1762.0" y2="1734.00" class="grid"/>
+<text x="1289.6666666666667" y="1738.00" text-anchor="end" class="axis">20%</text>
+<line x1="1296.6666666666667" y1="1676.00" x2="1762.0" y2="1676.00" class="grid"/>
+<text x="1289.6666666666667" y="1680.00" text-anchor="end" class="axis">30%</text>
+<line x1="1296.6666666666667" y1="1618.00" x2="1762.0" y2="1618.00" class="grid"/>
+<text x="1289.6666666666667" y="1622.00" text-anchor="end" class="axis">40%</text>
+<line x1="1296.6666666666667" y1="1560.00" x2="1762.0" y2="1560.00" class="grid"/>
+<text x="1289.6666666666667" y="1564.00" text-anchor="end" class="axis">50%</text>
+<line x1="1296.6666666666667" y1="1560.0" x2="1296.6666666666667" y2="1850.0" class="axis-line"/>
+<line x1="1296.6666666666667" y1="1850.0" x2="1762.0" y2="1850.0" class="axis-line"/>
+<text x="1319.20" y="1846.00" text-anchor="start" class="val-label" transform="rotate(-90 1319.20 1846.00)">0</text>
+<rect x="1333.70" y="1601.19" width="19.00" height="248.81" rx="2" fill="#e8743b" class="bar"/>
+<rect x="1357.70" y="1647.97" width="19.00" height="202.03" rx="2" fill="#2b83ba" class="bar"/>
+<text x="1343.20" y="1595.19" text-anchor="middle" class="k-label">K=4</text>
+<text x="1343.20" y="1868.0" text-anchor="middle" class="layer">QKV</text>
+<text x="1343.20" y="1883.0" text-anchor="middle" class="shape">10,240×8,192</text>
+<text x="1412.26" y="1846.00" text-anchor="start" class="val-label" transform="rotate(-90 1412.26 1846.00)">0</text>
+<rect x="1426.77" y="1741.33" width="19.00" height="108.67" rx="2" fill="#e8743b" class="bar"/>
+<rect x="1450.77" y="1849.41" width="19.00" height="0.59" rx="2" fill="#2b83ba" class="bar"/>
+<text x="1436.27" y="1735.33" text-anchor="middle" class="k-label">K=8</text>
+<text x="1436.27" y="1868.0" text-anchor="middle" class="layer">O</text>
+<text x="1436.27" y="1883.0" text-anchor="middle" class="shape">8,192×8,192</text>
+<text x="1505.33" y="1846.00" text-anchor="start" class="val-label" transform="rotate(-90 1505.33 1846.00)">0</text>
+<rect x="1519.83" y="1706.79" width="19.00" height="143.21" rx="2" fill="#e8743b" class="bar"/>
+<rect x="1543.83" y="1706.79" width="19.00" height="143.21" rx="2" fill="#2b83ba" class="bar"/>
+<text x="1529.33" y="1700.79" text-anchor="middle" class="k-label">K=1</text>
+<text x="1529.33" y="1868.0" text-anchor="middle" class="layer">GateUp</text>
+<text x="1529.33" y="1883.0" text-anchor="middle" class="shape">57,344×8,192</text>
+<text x="1598.40" y="1846.00" text-anchor="start" class="val-label" transform="rotate(-90 1598.40 1846.00)">0</text>
+<rect x="1612.90" y="1848.92" width="19.00" height="1.08" rx="2" fill="#e8743b" class="bar"/>
+<rect x="1636.90" y="1657.25" width="19.00" height="192.75" rx="2" fill="#2b83ba" class="bar"/>
+<text x="1622.40" y="1651.25" text-anchor="middle" class="k-label">K=4</text>
+<text x="1622.40" y="1868.0" text-anchor="middle" class="layer">Down</text>
+<text x="1622.40" y="1883.0" text-anchor="middle" class="shape">8,192×28,672</text>
+<text x="1691.46" y="1846.00" text-anchor="start" class="val-label" transform="rotate(-90 1691.46 1846.00)">0</text>
+<text x="1715.47" y="1846.00" text-anchor="start" class="val-label" transform="rotate(-90 1715.47 1846.00)">0</text>
+<text x="1739.47" y="1846.00" text-anchor="start" class="val-label" transform="rotate(-90 1739.47 1846.00)">0</text>
+<text x="1715.47" y="1830.00" text-anchor="middle" class="k-label">K=1</text>
+<text x="1715.47" y="1868.0" text-anchor="middle" class="layer">LM Head</text>
+<text x="1715.47" y="1883.0" text-anchor="middle" class="shape">128,256×8,192</text>
+<text x="92.0" y="1928" class="note">K = tuned Split-K, shared by both runs; M×K = weight shape. N/A = unmeasured, not zero. cuBLAS TC is 0 by construction (compared against itself).</text>
+</svg>

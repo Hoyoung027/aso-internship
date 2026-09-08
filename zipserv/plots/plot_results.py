@@ -312,6 +312,7 @@ def plot_llama_layer_speedup(
     points: list[FinalPoint],
     specs: dict[str, dict[str, Any]],
     batches: list[int],
+    scope_note: str = "",
 ) -> None:
     """One panel per enabled LLaMA model; each layer contains batch bars."""
     llama_models = [model for model in LLAMA_MODELS if model in specs]
@@ -325,7 +326,7 @@ def plot_llama_layer_speedup(
     lookup = {(point.model, point.layer, point.n): point.speedup for point in points}
     ymax = nice_ymax([point.speedup for point in points if point.model in llama_models])
     svg = svg_document(width, height)
-    svg.append(f'<text x="{width / 2}" y="38" text-anchor="middle" class="main-title">RTX 4090 — LLaMA3.1 layer-wise speedup</text>')
+    svg.append(f'<text x="{width / 2}" y="38" text-anchor="middle" class="main-title">RTX 4090 — LLaMA3.1 layer-wise speedup{html.escape(scope_note)}</text>')
     svg.append(f'<text x="{width / 2}" y="65" text-anchor="middle" class="subtitle">ZipGEMM normalized to cuBLAS_TC: speedup = cuBLAS_TC latency / ZipGEMM latency</text>')
     draw_batch_legend(svg, width, batches, 104)
 

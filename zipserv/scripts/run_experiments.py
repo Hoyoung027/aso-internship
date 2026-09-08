@@ -10,7 +10,6 @@ import json
 import os
 import platform
 import re
-import shutil
 import socket
 import subprocess
 import sys
@@ -40,6 +39,7 @@ class Case:
 RESULT_FIELDS = [
     "phase", "status", "error", "started_at", "finished_at", "wall_seconds",
     "returncode", "model", "layer", "M", "K", "N", "split_k", "trial",
+    "partial_dtype", "partial_workspace_bytes",
     "warmup", "repeat", "weight_source", "weight_model_dir", "weight_layout",
     "weight_tensors", "block_index",
     "seed", "cublas_latency_ms",
@@ -54,7 +54,9 @@ RESULT_FIELDS = [
     "zip_vs_non_tc_significant_error_percent",
     "zip_vs_tc_total_absolute_error", "zip_vs_tc_max_relative_error",
     "zip_vs_tc_average_relative_error", "zip_vs_tc_significant_error_count",
-    "zip_vs_tc_significant_error_percent", "log_file",
+    "zip_vs_tc_significant_error_percent",
+    "zip_vs_tc_absolute_error_threshold", "zip_vs_tc_absolute_error_exceedance_count",
+    "zip_vs_tc_absolute_error_exceedance_percent", "log_file",
 ]
 
 
@@ -67,6 +69,8 @@ def load_config(path: Path) -> dict[str, Any]:
         config = json.load(handle)
     if config.get("schema_version") != 1:
         raise ValueError(f"Unsupported config schema in {path}")
+    if config.get("partial_dtype", "bf16") not in ("bf16", "fp32"):
+        raise ValueError("partial_dtype must be bf16 or fp32")
     batches = config["matrix"]["batches"]
     splits = config["matrix"]["split_k_candidates"]
     if not batches or not splits or any(value <= 0 for value in batches + splits):
@@ -290,7 +294,10 @@ def make_run_cases(
     selected: dict[tuple[str, str, int, int, int, int], int] = {}
     unscoped: dict[tuple[str, str, int, int, int], int] = {}
     candidates_by_shape: dict[tuple[str, str, int, int, int], set[int]] = {}
-    for row in read_selected_splitk(selection_file):
+    selection_rows = read_selected_splitk(selection_file)
+    if len({row.get("partial_dtype") or "bf16" for row in selection_rows}) > 1:
+        raise ValueError("Selection file mixes partial dtypes; provide a single tuning result")
+    for row in selection_rows:
         shape_key = (
             row["model"], row["layer"], int(row["M"]), int(row["K"]), int(row["N"]),
         )
@@ -383,6 +390,8 @@ def ensure_binaries(config: dict[str, Any]) -> None:
         if "=" in line:
             key, value = line.split("=", 1)
             manifest[key] = value
+    if config.get("partial_dtype", "bf16") not in manifest.get("partial_dtypes", "").split(","):
+        raise RuntimeError("Rebuild binaries with scripts/build_benchmarks.sh for partial-dtype support")
     for phase in ("tune", "final"):
         for metric in ("warmup", "repeat"):
             key = f"{phase}_{metric}"
@@ -411,12 +420,18 @@ def write_manifest(
         "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES", "UNSET"),
         "zipserv_commit": command_output(["git", "-C", str(zip_root), "rev-parse", "HEAD"], env),
         "device_query": device_query, "input": config["input"],
+        "partial_dtype": config.get("partial_dtype", "bf16"),
+        "selection_file": str(args.selection_file.resolve()) if args.selection_file else None,
+        "selection_sha256": hashlib.sha256(args.selection_file.read_bytes()).hexdigest() if args.selection_file else None,
         "matrix": config["matrix"], "phases": config["phases"],
     }
     (output_dir / "manifest.json").write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
-    shutil.copy2(config_path, output_dir / "experiments.json")
+    # Persist the effective config, including direct CLI overrides.
+    (output_dir / "experiments.json").write_text(
+        json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
 
 
 def parse_float(pattern: str, text: str) -> float | None:
@@ -473,6 +488,15 @@ def parse_metrics(csv_path: Path, log_text: str) -> dict[str, Any]:
         metrics[f"{prefix}_significant_error_percent"] = parse_float(
             r"Significant error element count:.*?\(([0-9.eE+-]+)%\)", block
         )
+        if prefix == "zip_vs_tc":
+            threshold = parse_float(r"Absolute error threshold:\s*([0-9.eE+-]+)", block)
+            count = parse_float(r"Absolute error exceedance count:\s*([0-9]+)", block)
+            percent = parse_float(r"Absolute error exceedance count:.*?\(([0-9.eE+-]+)%\)", block)
+            # Old binaries/logs lack these measurements; do not fabricate zeros.
+            if threshold is not None and count is not None and percent is not None:
+                metrics["zip_vs_tc_absolute_error_threshold"] = threshold
+                metrics["zip_vs_tc_absolute_error_exceedance_count"] = int(count)
+                metrics["zip_vs_tc_absolute_error_exceedance_percent"] = percent
     return metrics
 
 
@@ -537,7 +561,8 @@ def execute_case(
         "--model", case.model, "--layer", case.layer,
     ]
     input_config = config["input"]
-    command.extend(["--seed", str(input_config["seed"])])
+    partial_dtype = config.get("partial_dtype", "bf16")
+    command.extend(["--seed", str(input_config["seed"]), "--partial-dtype", partial_dtype])
     weight_model_dir = ""
     weight_layout = ""
     resolved_weight_tensors: list[str] = []
@@ -589,6 +614,14 @@ def execute_case(
         except Exception as exc:
             error = f"{type(exc).__name__}: {exc}"
         metrics = parse_metrics(work_dir / "bf16_triplebm_res.csv", log_text)
+    # Reject stale binaries that silently ignore the new command-line option.
+    workspace_bytes = parse_float(r"^Partial workspace bytes:\s*(\d+)$", log_text)
+    expected_workspace = (case.m * case.n * case.split_k * (4 if partial_dtype == "fp32" else 2)
+                          if case.split_k > 1 else 0)
+    reported_dtype = re.search(r"^Partial dtype:\s*(bf16|fp32)$", log_text, re.MULTILINE)
+    if status == "ok" and (reported_dtype is None or reported_dtype.group(1) != partial_dtype
+                           or workspace_bytes != expected_workspace):
+        status, error = "failed", "partial dtype/workspace verification failed; rebuild benchmark binaries"
     required = {"cublas", "cublas_tc", "zipgemm"}
     if status == "ok" and not required.issubset(metrics):
         status, error = "failed", f"missing performance rows: {sorted(required - set(metrics))}"
@@ -601,6 +634,8 @@ def execute_case(
         "finished_at": utc_now(), "wall_seconds": time.monotonic() - start,
         "returncode": "" if returncode is None else returncode, "model": case.model,
         "layer": case.layer, "M": case.m, "K": case.k, "N": case.n,
+        "partial_dtype": partial_dtype,
+        "partial_workspace_bytes": "" if workspace_bytes is None else int(workspace_bytes),
         "split_k": case.split_k, "trial": case.trial, "warmup": settings["warmup"],
         "repeat": settings["repeat"], "weight_source": input_config["weight_source"],
         "weight_model_dir": weight_model_dir, "weight_layout": weight_layout,
@@ -636,6 +671,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--models", nargs="+")
     parser.add_argument("--layers", nargs="+")
     parser.add_argument("--block-index", type=int, help="Override the configured real-weight block")
+    parser.add_argument("--partial-dtype", choices=("bf16", "fp32"), help="Override partial-sum storage dtype")
     parser.add_argument("--batches", nargs="+", type=int)
     parser.add_argument("--splits", nargs="+", type=int)
     parser.add_argument("--max-cases", type=int)
@@ -650,6 +686,8 @@ def main() -> int:
     args = parse_args()
     config_path = args.config.expanduser().resolve()
     config = load_config(config_path)
+    if args.partial_dtype is not None:
+        config["partial_dtype"] = args.partial_dtype
     shapes = selected_shapes(config, args.models, args.layers)
     if args.mode == "tune":
         cases, phase = make_tune_cases(config, shapes, args), "tune"
@@ -668,6 +706,10 @@ def main() -> int:
         raise ValueError("--output-dir and --log-file are required")
     output_dir, log_file = args.output_dir.expanduser().resolve(), args.log_file.expanduser().resolve()
     result_file = output_dir / "result.csv"
+    existing_rows = load_rows(result_file)
+    if any((row.get("partial_dtype") or "bf16") != config.get("partial_dtype", "bf16")
+           for row in existing_rows):
+        raise ValueError("Cannot mix partial dtypes in an existing result directory; use a new output directory")
     output_dir.mkdir(parents=True, exist_ok=True)
     ensure_binaries(config)
     env = runtime_env(config)
@@ -675,7 +717,7 @@ def main() -> int:
     if not (output_dir / "manifest.json").is_file():
         write_manifest(output_dir, config_path, config, args, env, device_query)
 
-    indexed = {row_key(row): row for row in load_rows(result_file)}
+    indexed = {row_key(row): row for row in existing_rows}
     failures = 0
     print(f"Mode={phase}; cases={len(cases)}; result={result_file}; log={log_file}", flush=True)
     for index, case in enumerate(cases, start=1):

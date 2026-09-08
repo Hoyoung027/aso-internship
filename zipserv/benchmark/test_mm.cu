@@ -295,6 +295,7 @@ int main(int argc, char** argv)
     std::vector<std::string> weight_tensor_names;
     int block_index = 0;
     unsigned seed = 12345;
+    std::string partial_dtype = "bf16";
     
     // Parameter parsing
     for (int i = 1; i < argc; i++) {
@@ -309,6 +310,16 @@ int main(int argc, char** argv)
             weight_tensor_names.push_back(argv[++i]);
         } else if (arg == "--block-index" && i + 1 < argc) {
             block_index = std::stoi(argv[++i]);
+        } else if (arg == "--partial-dtype") {
+            if (i + 1 >= argc) {
+                fprintf(stderr, "--partial-dtype requires bf16 or fp32\n");
+                return 2;
+            }
+            partial_dtype = argv[++i];
+            if (partial_dtype != "bf16" && partial_dtype != "fp32") {
+                fprintf(stderr, "Invalid partial dtype: %s\n", partial_dtype.c_str());
+                return 2;
+            }
         } else if (arg == "--seed" && i + 1 < argc) {
             seed = static_cast<unsigned>(
                 std::stoul(argv[++i])
@@ -322,7 +333,7 @@ int main(int argc, char** argv)
             "[--model MODEL] [--layer LAYER] "
             "[--model-dir DIR] [--weight-tensor NAME]... "
             "[--block-index INDEX] "
-            "[--seed SEED]\n"
+            "[--seed SEED] [--partial-dtype bf16|fp32]\n"
         );
         return -1;
     }
@@ -338,6 +349,7 @@ int main(int argc, char** argv)
     
     printf("====== BF16 Triple Bitmap Compressed Matrix Multiplication Test ======\n");
     printf("Dimensions: M=%d, K=%d, N=%d, SPLIT_K=%d\n", M_GLOBAL, K_GLOBAL, N_GLOBAL, SPLIT_K);
+    printf("Partial dtype: %s\n", partial_dtype.c_str());
     printf("Debug level: %d\n\n", debug_level);
     
     cublasStatus_t cublas_status;
@@ -853,34 +865,48 @@ int main(int argc, char** argv)
     Split_K = SPLIT_K;
     printf("Split_K = %d\n", Split_K);
     __nv_bfloat16* Reduction_Workspace_BF16TripleBitmap = NULL;
-    cudaMalloc(reinterpret_cast<void**>(&Reduction_Workspace_BF16TripleBitmap), 
-               sizeof(__nv_bfloat16) * M_GLOBAL * N_GLOBAL * Split_K);
-    if (Reduction_Workspace_BF16TripleBitmap == NULL) {
-        printf("Error: cudaMalloc failed\n");
-        exit(-1);
+    float* Reduction_Workspace_FP32 = nullptr;
+    // Allocate only the selected workspace; Split-K=1 needs neither buffer.
+    size_t workspace_bytes = 0;
+    if (Split_K > 1) {
+        size_t elements = static_cast<size_t>(M_GLOBAL) * N_GLOBAL * Split_K;
+        workspace_bytes = elements * (partial_dtype == "fp32" ? sizeof(float) : sizeof(__nv_bfloat16));
+        cudaError_t allocation_status;
+        if (partial_dtype == "fp32") {
+            allocation_status = cudaMalloc(reinterpret_cast<void**>(&Reduction_Workspace_FP32), workspace_bytes);
+        } else {
+            allocation_status = cudaMalloc(reinterpret_cast<void**>(&Reduction_Workspace_BF16TripleBitmap), workspace_bytes);
+        }
+        if (allocation_status != cudaSuccess) {
+            fprintf(stderr, "Workspace allocation failed (%zu bytes): %s\n", workspace_bytes, cudaGetErrorString(allocation_status));
+            return 1;
+        }
     }
+    printf("Partial workspace bytes: %zu\n", workspace_bytes);
+
+    auto run_zipserv = [&]() -> cudaError_t {
+        if (partial_dtype == "fp32") {
+            return BF16TripleBitmap_MM_FP32Workspace_API(0,
+                sign_mantissa_gpu, compressed_full_gpu, bitmap1_gpu, bitmap2_gpu, bitmap3_gpu,
+                TileOffsets_median_gpu, TileOffsets_global_gpu, max_high_freq_count, max_full_count,
+                start_exp, B, D_BF16TripleBitmap, M_GLOBAL, N_GLOBAL, K_GLOBAL,
+                Reduction_Workspace_FP32, Split_K);
+        }
+        return BF16TripleBitmap_MM_API(0,
+            sign_mantissa_gpu, compressed_full_gpu, bitmap1_gpu, bitmap2_gpu, bitmap3_gpu,
+            TileOffsets_median_gpu, TileOffsets_global_gpu, max_high_freq_count, max_full_count,
+            start_exp, B, D_BF16TripleBitmap, M_GLOBAL, N_GLOBAL, K_GLOBAL,
+            Reduction_Workspace_BF16TripleBitmap, Split_K);
+    };
     
     printf("Running warmup...\n");
     for (int i = 0; i < WARM_UP_ITERATION; i++) {
         // printf("  Warmup iteration %d/%d\n", i+1, WARM_UP_ITERATION);
-        BF16TripleBitmap_MM_API(0,
-                        sign_mantissa_gpu,
-                        compressed_full_gpu,
-                        bitmap1_gpu,
-                        bitmap2_gpu,
-                        bitmap3_gpu,
-                        TileOffsets_median_gpu,
-                        TileOffsets_global_gpu,
-                        max_high_freq_count,
-                        max_full_count,
-                        start_exp,
-                        B,
-                        D_BF16TripleBitmap,
-                        M_GLOBAL,
-                        N_GLOBAL,
-                        K_GLOBAL,
-                        Reduction_Workspace_BF16TripleBitmap,
-                        Split_K);
+        cudaError_t zip_status = run_zipserv();
+        if (zip_status != cudaSuccess) {
+            fprintf(stderr, "ZipServ launch failed: %s\n", cudaGetErrorString(zip_status));
+            return 1;
+        }
         cudaDeviceSynchronize();
         checkLastCudaError(__LINE__);
     }
@@ -896,24 +922,11 @@ int main(int argc, char** argv)
         
         // Measure only the MM operation time, excluding cache flush overhead
         cudaEventRecord(start);
-        BF16TripleBitmap_MM_API(0,
-                        sign_mantissa_gpu,
-                        compressed_full_gpu,
-                        bitmap1_gpu,
-                        bitmap2_gpu,
-                        bitmap3_gpu,
-                        TileOffsets_median_gpu,
-                        TileOffsets_global_gpu,
-                        max_high_freq_count,
-                        max_full_count,
-                        start_exp,
-                        B,
-                        D_BF16TripleBitmap,
-                        M_GLOBAL,
-                        N_GLOBAL,
-                        K_GLOBAL,
-                        Reduction_Workspace_BF16TripleBitmap,
-                        Split_K);
+        cudaError_t zip_status = run_zipserv();
+        if (zip_status != cudaSuccess) {
+            fprintf(stderr, "ZipServ launch failed: %s\n", cudaGetErrorString(zip_status));
+            return 1;
+        }
         cudaEventRecord(stop);
         cudaEventSynchronize(stop);
         checkLastCudaError(__LINE__);
@@ -982,10 +995,16 @@ int main(int argc, char** argv)
     double max_rel_error_tc = 0.0;
     double avg_rel_error_tc = 0.0;
     int error_count_tc = 0;
+    // Absolute output-value threshold, independent of the reference magnitude.
+    // This host-side verification is outside the performance timing region.
+    const double absolute_error_threshold_tc = 1e-4;
+    size_t absolute_error_count_tc = 0;
     
     for (int i = 0; i < M_GLOBAL * N_GLOBAL; i++) {
         float cublas_val = __bfloat162float(D_cublas_tc_h[i]);
         float our_val = __bfloat162float(D_BF16TripleBitmap_h[i]);
+        if (std::abs(static_cast<double>(our_val) - cublas_val) > absolute_error_threshold_tc)
+            ++absolute_error_count_tc;
         
         if (cublas_val != 0.0f) {
             double rel_error = std::abs((our_val - cublas_val) / cublas_val);
@@ -1014,6 +1033,10 @@ int main(int argc, char** argv)
     printf("  Max relative error: %g\n", max_rel_error_tc);
     printf("  Average relative error: %g\n", avg_rel_error_tc);
     printf("  Significant error element count: %d (%.2f%%)\n", error_count_tc, 100.0f * error_count_tc / (M_GLOBAL * N_GLOBAL));
+    printf("  Absolute error threshold: %.17g\n", absolute_error_threshold_tc);
+    printf("  Absolute error exceedance count: %zu (%.9f%%)\n",
+           absolute_error_count_tc,
+           100.0 * absolute_error_count_tc / (static_cast<size_t>(M_GLOBAL) * N_GLOBAL));
     
     // Print error samples if discrepancies are large (compare triple bitmap with TC CuBLAS)
     if (error_count_no_tc > 0 && debug_level >= 1) {
@@ -1054,6 +1077,7 @@ int main(int argc, char** argv)
     cudaFree(max_high_freq_gpu);
     cudaFree(max_full_gpu);
     cudaFree(Reduction_Workspace_BF16TripleBitmap);
+    cudaFree(Reduction_Workspace_FP32);
     
     // Print performance results
     printf("\n========== Performance Results ==========\n");

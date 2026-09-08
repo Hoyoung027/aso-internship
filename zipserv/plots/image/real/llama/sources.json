@@ -1,0 +1,67 @@
+{
+  "generated_at": "2026-09-08T07:53:43.273215+00:00",
+  "tuning_root": "/home/hybyun0207/aso-internship/zipserv/results/zipserv-rtx4090-llama31-realweights-3blocks-abserror-20260907-204057-tuning",
+  "run_root": "/home/hybyun0207/aso-internship/zipserv/results/zipserv-rtx4090-llama31-realweights-3blocks-abserror-20260907-204057-run",
+  "blocks": {
+    "llama3.1-8b": [
+      0,
+      16,
+      31
+    ],
+    "llama3.1-70b": [
+      0,
+      40,
+      79
+    ]
+  },
+  "note": "Block-0 legacy filenames; other blocks explicit. LM Head counted once. Model average is the arithmetic mean of 13 operation speedups, not end-to-end speedup.",
+  "inputs": {
+    "/home/hybyun0207/aso-internship/zipserv/results/zipserv-rtx4090-llama31-realweights-3blocks-abserror-20260907-204057-tuning/result_all.csv": "bc206da15c977b394acdfc119e0ad15dfb007688ee49dc7f25c425660c19c9a8",
+    "/home/hybyun0207/aso-internship/zipserv/results/zipserv-rtx4090-llama31-realweights-3blocks-abserror-20260907-204057-tuning/selected_splitk.csv": "48478048c9177e1e078d15afdbff0c3f6e6b8fe94d451a6a81167e179bf4faa5",
+    "/home/hybyun0207/aso-internship/zipserv/results/zipserv-rtx4090-llama31-realweights-3blocks-abserror-20260907-204057-run/result_all.csv": "66a6504bcefc7e603e9fbcb6f2daf6b71a12df7b33b9a6af82b10d2664244888",
+    "/home/hybyun0207/aso-internship/zipserv/results/zipserv-rtx4090-llama31-realweights-3blocks-abserror-20260907-204057-tuning/experiments.json": "dc7ca46b89f0cefa578703fa3a46c344caa06d07cf175bb39d804e138da8870a",
+    "/home/hybyun0207/aso-internship/zipserv/results/zipserv-rtx4090-llama31-realweights-3blocks-abserror-20260907-204057-run/experiments.json": "dc7ca46b89f0cefa578703fa3a46c344caa06d07cf175bb39d804e138da8870a",
+    "/home/hybyun0207/aso-internship/zipserv/results/zipserv-rtx4090-llama31-realweights-3blocks-abserror-20260907-204057-run/logs/llama3.1-70b-block-0.log": "36fdfd0f0ad4bd86aecf84926dd83666bf21c32fe95f38d1475d2b0b505dc8b2",
+    "/home/hybyun0207/aso-internship/zipserv/results/zipserv-rtx4090-llama31-realweights-3blocks-abserror-20260907-204057-run/logs/llama3.1-70b-block-40.log": "af057c0d77f638f0c16795729806963937a74acb55c58634b119cf277d9ef8b2",
+    "/home/hybyun0207/aso-internship/zipserv/results/zipserv-rtx4090-llama31-realweights-3blocks-abserror-20260907-204057-run/logs/llama3.1-70b-block-79.log": "d91a5d30f04deb7b9dcb638b09cf69bd0da89c2ad02d72059f9e1753457e232c",
+    "/home/hybyun0207/aso-internship/zipserv/results/zipserv-rtx4090-llama31-realweights-3blocks-abserror-20260907-204057-run/logs/llama3.1-8b-block-0.log": "dff38b704d772966a37e673c5743bbddcce5fa480be62166af1394a3403bc1c2",
+    "/home/hybyun0207/aso-internship/zipserv/results/zipserv-rtx4090-llama31-realweights-3blocks-abserror-20260907-204057-run/logs/llama3.1-8b-block-16.log": "ee361246d5122b619aa94e027aab5bfe259fc43cf9e94674e1d6b9f16a89b29b",
+    "/home/hybyun0207/aso-internship/zipserv/results/zipserv-rtx4090-llama31-realweights-3blocks-abserror-20260907-204057-run/logs/llama3.1-8b-block-31.log": "b8e5bfcfc49ed660c90a464fc2b798e1de2299015e8c827e1dc83e930ec4876f"
+  },
+  "scripts": {
+    "refresh_real_llama.py": "e8ba1ef35fc21ce84bdeaf593e83832e22c2b448004f23abfa166bb2f678008a",
+    "plot_real_splitk_speedup.py": "26b248d5503a50da986524a939cafc80bc5f1cf2ac24ffbbda88cb0b61689bc5",
+    "plot_llama_error.py": "375b01cedd5dd9268b9f89055bd4ea0f3bc9aea827e417df6a57019d3f4460db",
+    "plot_real_model_average_speedup.py": "170833e18506ec9f4980b6eb8ad0f0f3cdedbf364ec17d296e6a1a67e0e8ff38",
+    "plot_splitk_speedup.py": "49a8aef254a31796eb7979d01b933489b00915abd01069748d9f90b0e734b59f",
+    "plot_real_layer_speedup.py": "a63e24ac7c22f3670abfc8957dea427e51fbb2758834c4dfb54b7e80f418b101",
+    "plot_latency_by_splitk.py": "ee5696279b728929c44a6519785c33d689ec4eb328d04d19514d4689c51349fc",
+    "plot_results.py": "b63e7c0071df24dee56016f46c5b3a7dec97c8b1bc6570880f737ea9fd3c70c6",
+    "plot_real_weight_overview.py": "da58ad36b65d6e6548938590e1f363492e101fb9a54e4e79fbac705ffe064559"
+  },
+  "images": {
+    "llama3.1-70b_block-40_error.png": "77d3c66fcf73669047664b1f3ce3d9f7df82910110a50e4e4d7f3dcf51a00601",
+    "llama3.1-70b_block-40_latency_by_splitk.png": "ed18158e6035c7a94829fe0ddb906dd21cf6d60489daf64c6cd03fe27e2f2426",
+    "llama3.1-70b_block-79_error.png": "e2f09aa5ee249a4bef96236f4190156f846f476e3968e7051b1d4e40df1b1c63",
+    "llama3.1-70b_block-79_latency_by_splitk.png": "df5ff9452bba47a838715d9cdceada0d682397af44e5683991ace2fb6bc9d2d4",
+    "llama3.1-70b_error.png": "a65971c1ed45237c917f8ba31b751fc14c18aa18319f376f9fe47fc12b410de4",
+    "llama3.1-70b_latency_by_splitk.png": "042ddceafed84618be9cdec71315b9e7f661e60c9bb2678dece28dd646723fac",
+    "llama3.1-70b_real_weight_overview.png": "e5e0eaaeff85ddf2f390365380d4d0b4c7171c11eae160eb2726cff28b020d98",
+    "llama3.1-8b_block-16_error.png": "f947e547b70f6fca24fc784c809214316ded8501226ff4c01a442657f0b68a06",
+    "llama3.1-8b_block-16_latency_by_splitk.png": "f6bca0bb69568ea30a7f4c979f3de07fdf47f2b9b31a2a43788c4207a70457d5",
+    "llama3.1-8b_block-31_error.png": "f10c2ce0259506fc766ee4a308afdadfc3f3262ecf1ddf87fefa6603df466d4a",
+    "llama3.1-8b_block-31_latency_by_splitk.png": "e2dcd954adcd345e2afdc24aa2189121f86e1e837e6a929aa290a2b358dcf3d8",
+    "llama3.1-8b_error.png": "3810278fc341711f42b485e4ce81591a81e44d43326c1d695cd102895b97cba8",
+    "llama3.1-8b_latency_by_splitk.png": "f7772dc96c1fa15013d0160952d3cc99792f88cef676d53d97d5ff45666961c5",
+    "llama3.1-8b_real_weight_overview.png": "73a3a21761b5b472733922a5cf8ece0d60aa20a36c40fd549a8c0b5afd6eeefd",
+    "llama3.1_layerwise_speedup.png": "645504870066e4fa46bce4f39c4d44c477bc61a6bd270c66a1b7de09c20f0087",
+    "llama31_layer_speedup.png": "bbc737b1627a96670110db603330e3f6cbb1885f0973c9bba98fa3bbd51e5b3c",
+    "model_average_speedup.png": "eefbef4d9dcfc96f7e85295d4db71da93ffe23cfd9a969e158dea05f85df6c5a",
+    "splitk_speedup/llama3.1-70b_block-0_splitk_speedup.png": "d6f55012c281264505b290640e7b10831f1f7589f6dd7fd081ebc4c0a781ee8b",
+    "splitk_speedup/llama3.1-70b_block-40_splitk_speedup.png": "acc54e8c9849ce1143aec0519b6d8d8994ac16a266a43f3a0b81848ad340b3c7",
+    "splitk_speedup/llama3.1-70b_block-79_splitk_speedup.png": "d0430f29b8623db7533faa7d87f9bfde0d269757c9aad89239c3aa9489d460f5",
+    "splitk_speedup/llama3.1-8b_block-0_splitk_speedup.png": "d5b39fa4c743617ddcf179a6b6ea570d2cdb32b41d00fd19fa0c8d88b932268c",
+    "splitk_speedup/llama3.1-8b_block-16_splitk_speedup.png": "cd0a8287683f4535281352b070602397d21d8cda95129eeb5e5111bd945dacde",
+    "splitk_speedup/llama3.1-8b_block-31_splitk_speedup.png": "0acf80564ab5d8629cb3a7eadd0757c81eda0bd18b5abb3248ee7c7e3d34784a"
+  }
+}

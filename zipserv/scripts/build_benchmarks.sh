@@ -123,6 +123,7 @@ trap - EXIT INT TERM
   printf 'safetensors_cpp_commit=%s\n' "$(git -C "$EXP_ROOT/deps/safetensors-cpp" rev-parse HEAD 2>/dev/null || echo unknown)"
   printf 'nlohmann_json_commit=%s\n' "$(git -C "$EXP_ROOT/deps/nlohmann-json" rev-parse HEAD 2>/dev/null || echo unknown)"
   printf 'built_at=%s\n' "$(date --iso-8601=seconds)"
+  printf 'partial_dtypes=bf16,fp32\n'
 } > "$BIN_DIR/build_manifest.txt"
 
 echo "Built:"
