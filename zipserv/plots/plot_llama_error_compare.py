@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Compare ZipServ numerical error under bf16 vs fp32 partial-sum accumulation.
 
-Both variants are measured against the same reference, cuBLAS TC (which is
-shown as an explicit zero-error baseline bar). Reuses the panel layout and
-error metrics from plot_llama_error.py, generalized from one bar per layer
-to a 3-bar cluster (cuBLAS TC / ZipServ bf16 / ZipServ fp32).
+Both variants are measured against cuBLAS TC, named in the subtitle only.
+Reuses the panel layout and error metrics from plot_llama_error.py with
+two bars per layer: ZipServ bf16 and ZipServ fp32 partial sums.
 """
 
 from __future__ import annotations
@@ -30,30 +29,15 @@ from plot_llama_error import (
     model_display_name,
 )
 
-METHODS = ("tc", "zip_bf16", "zip_fp32")
+METHODS = ("zip_bf16", "zip_fp32")
 METHOD_LABELS = {
-    "tc": "cuBLAS TC (reference, error = 0)",
     "zip_bf16": "ZipServ · bf16 partial sums",
     "zip_fp32": "ZipServ · fp32 partial sums",
 }
 METHOD_COLORS = {
-    "tc": "#9aa5b1",
     "zip_bf16": "#e8743b",
     "zip_fp32": "#2b83ba",
 }
-
-
-def tc_reference_points(points: list[ErrorPoint]) -> list[ErrorPoint]:
-    # cuBLAS TC compared against itself: every error metric is exactly zero,
-    # by construction rather than measurement.
-    return [
-        ErrorPoint(
-            model=p.model, layer=p.layer, m=p.m, k=p.k, n=p.n, split_k=p.split_k,
-            zip_relative_percent=0.0, zip_mae=0.0, zip_significant_percent=0.0,
-            zip_absolute_significant_percent=0.0,
-        )
-        for p in points
-    ]
 
 
 def metric_scales(points_by_method: dict[str, list[ErrorPoint]]) -> list[tuple[float, float, list[float]]]:
@@ -134,7 +118,7 @@ def draw_panel(
                 svg.append(f'<rect x="{bx:.2f}" y="{yy:.2f}" width="{bar_width:.2f}" height="{bottom - yy:.2f}" rx="2" fill="{METHOD_COLORS[method]}" class="bar"/>')
                 bar_tops.append(yy)
             else:
-                # A zero error (the cuBLAS TC reference) cannot sit on a log axis: label it explicitly.
+                # A measured zero error cannot sit on a log axis: label it explicitly.
                 label_y = bottom - 4
                 svg.append(f'<text x="{bar_center:.2f}" y="{label_y:.2f}" text-anchor="start" class="val-label" transform="rotate(-90 {bar_center:.2f} {label_y:.2f})">0</text>')
         cluster_top = min(bar_tops) if bar_tops else bottom - 14
@@ -187,7 +171,7 @@ def plot_model(
             }
             draw_panel(svg, batch_points_by_method, methods, layers, metric, bounds, plot_left, plot_right, top, bottom)
 
-    svg.append(f'<text x="{outer_left}" y="{height - 22}" class="note">K = tuned Split-K, shared by both runs; M×K = weight shape. N/A = unmeasured, not zero. cuBLAS TC is 0 by construction (compared against itself).</text>')
+    svg.append(f'<text x="{outer_left}" y="{height - 22}" class="note">K = tuned Split-K, shared by both runs; M×K = weight shape. N/A = unmeasured, not zero.</text>')
     save_svg(path, svg)
 
 
@@ -246,7 +230,6 @@ def main() -> int:
         model_bf16 = [point for point in bf16_points if point.model == model]
         model_fp32 = [point for point in fp32_points if point.model == model]
         points_by_method = {
-            "tc": tc_reference_points(model_fp32),
             "zip_bf16": model_bf16,
             "zip_fp32": model_fp32,
         }
