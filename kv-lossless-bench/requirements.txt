@@ -1,0 +1,7 @@
+# scripts/setup_env.sh installs the CUDA 13.0 Torch build first.
+torch==2.11.0
+transformers==4.57.6
+numpy==2.3.5
+safetensors
+matplotlib>=3.8
+datasets

@@ -1,0 +1,9 @@
+__pycache__/
+.venv/
+*.pyc
+results/*
+!results/.gitkeep
+data/*.npy
+data/*.npz
+kv-exp-a-*.out
+slurm-bootstrap-*.out
